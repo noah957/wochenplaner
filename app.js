@@ -254,7 +254,13 @@
     if (!tasks.length) {
       const hint = document.createElement("div");
       hint.className = "empty-hint";
-      hint.textContent = EMPTY_HINTS[hashCode(dayKey) % EMPTY_HINTS.length];
+      const img = document.createElement("img");
+      img.className = "empty-img";
+      img.src = "assets/empty.png";
+      img.alt = "";
+      const label = document.createElement("span");
+      label.textContent = EMPTY_HINTS[hashCode(dayKey) % EMPTY_HINTS.length];
+      hint.append(img, label);
       list.appendChild(hint);
       return;
     }
@@ -974,6 +980,29 @@
     setTimeout(() => showToast("Tipp: Lege unter „Familie“ an, wer bei euch mitmacht."), 900);
   } else if (!me) {
     setTimeout(() => showToast("Tipp: Tippe oben auf „?“ und sag mir, wer du bist."), 900);
+  }
+
+  // Magnetische Buttons (portiert aus dem Optima-Projekt) — nur Desktop
+  if (!reducedMotion && window.matchMedia("(pointer: fine)").matches) {
+    document.querySelectorAll("[data-magnetic]").forEach((el) => {
+      const strength = 0.24;
+      el.addEventListener("pointermove", (e) => {
+        const r = el.getBoundingClientRect();
+        const x = (e.clientX - (r.left + r.width / 2)) * strength;
+        const y = (e.clientY - (r.top + r.height / 2)) * strength;
+        el.style.transition = "transform 0s";
+        el.style.transform = `translate(${x}px, ${y}px)`;
+      });
+      el.addEventListener("pointerleave", () => {
+        const from = el.style.transform || "translate(0px, 0px)";
+        el.style.transition = "";
+        el.style.transform = "";
+        el.animate(
+          [{ transform: from }, { transform: "translate(0px, 0px)" }],
+          { duration: 500, easing: "cubic-bezier(0.22, 1, 0.36, 1)" }
+        );
+      });
+    });
   }
 
   // PWA: offline-fähig, als App installierbar

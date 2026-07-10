@@ -1,4 +1,4 @@
-const VERSION = "wochenplaner-v2";
+const VERSION = "wochenplaner-v3";
 const CORE = [
   "./",
   "./index.html",
@@ -8,6 +8,7 @@ const CORE = [
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./icons/apple-touch-icon.png",
+  "./assets/empty.png",
 ];
 
 self.addEventListener("install", (e) => {
