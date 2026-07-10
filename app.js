@@ -100,10 +100,19 @@
 
   function sortTasks(tasks) {
     return tasks.slice().sort((a, b) => {
+      // Erledigtes sinkt nach unten, Offenes bleibt im Blick
+      if (a.done !== b.done) return a.done ? 1 : -1;
       const t = (a.time || "99:99").localeCompare(b.time || "99:99");
       if (t !== 0) return t;
       return (PRIO_WEIGHT[a.prio] ?? 3) - (PRIO_WEIGHT[b.prio] ?? 3);
     });
+  }
+
+  // Reihenfolge in der Tagesspalte: Erinnerungen, Aufgaben, Privates
+  function groupOf(task) {
+    if (task.kind === "reminder") return 0;
+    if (task.private) return 2;
+    return 1;
   }
 
   // Datenschutz-Sichtbarkeit: Erinnerungen sieht nur der Empfänger und
@@ -191,6 +200,9 @@
         if (tasks.every((t) => t.done)) dot.classList.add("all-done");
         chip.appendChild(dot);
       }
+      if (me && tasks.some((t) => t.kind === "reminder" && t.assignee === me && !t.done)) {
+        chip.classList.add("has-reminder");
+      }
 
       chip.addEventListener("click", () => {
         if (i === selectedDayIdx) return;
@@ -248,6 +260,12 @@
     t.finished.finally(() => document.documentElement.classList.remove("vt"));
   }
 
+  const GROUP_META = [
+    { cls: "gl-reminder", label: "Erinnerungen", icon: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2.2a4 4 0 0 0-4 4v2.6L2.8 11h10.4L12 8.8V6.2a4 4 0 0 0-4-4Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>' },
+    { cls: "gl-task", label: "Aufgaben", icon: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
+    { cls: "gl-private", label: "Privat", icon: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5.5 7V5.5a2.5 2.5 0 0 1 5 0V7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>' },
+  ];
+
   function renderTasks(list, dayKey, tasks) {
     list.innerHTML = "";
 
@@ -258,6 +276,8 @@
       img.className = "empty-img";
       img.src = "assets/empty.png";
       img.alt = "";
+      img.width = 92;
+      img.height = 92;
       const label = document.createElement("span");
       label.textContent = EMPTY_HINTS[hashCode(dayKey) % EMPTY_HINTS.length];
       hint.append(img, label);
@@ -265,7 +285,27 @@
       return;
     }
 
-    tasks.forEach((task, idx) => {
+    // in Gruppen sortieren; Labels nur, wenn mehr als eine Gruppe belegt ist
+    const grouped = tasks.slice().sort((a, b) => groupOf(a) - groupOf(b));
+    const usedGroups = new Set(grouped.map(groupOf));
+    const showLabels = usedGroups.size > 1;
+    let lastGroup = -1;
+
+    grouped.forEach((task, idx) => {
+      const g = groupOf(task);
+      if (showLabels && g !== lastGroup) {
+        lastGroup = g;
+        const label = document.createElement("li");
+        label.className = `group-label ${GROUP_META[g].cls}`;
+        label.innerHTML = `${GROUP_META[g].icon}<span>${GROUP_META[g].label}</span>`;
+        list.appendChild(label);
+      }
+      renderTaskItem(list, dayKey, task, idx);
+    });
+  }
+
+  function renderTaskItem(list, dayKey, task, idx) {
+    {
       const frag = taskTemplate.content.cloneNode(true);
       const li = frag.querySelector(".task");
       const check = frag.querySelector(".task-check");
@@ -356,7 +396,7 @@
       });
 
       list.appendChild(frag);
-    });
+    }
   }
 
   function paintAssignBtn(btn, task) {
@@ -753,6 +793,103 @@
     if (celebrate && pct === 100 && lastPct !== 100 && total > 0) confettiBurst(statsPctEl, 22);
     lastPct = pct;
     renderMemberStats(dates);
+    renderForYou(dates);
+  }
+
+  /* ---------- "Für dich": deine Woche auf einen Blick ---------- */
+
+  let fyOpen = false;
+  const forYouEl = document.getElementById("forYou");
+  const forYouToggle = document.getElementById("forYouToggle");
+  const forYouPanel = document.getElementById("forYouPanel");
+  const DAY_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+
+  forYouToggle.addEventListener("click", () => {
+    fyOpen = !fyOpen;
+    forYouPanel.hidden = !fyOpen;
+    forYouToggle.setAttribute("aria-expanded", String(fyOpen));
+  });
+
+  function renderForYou(dates) {
+    const m = memberById(me);
+    if (!m) {
+      forYouEl.hidden = true;
+      return;
+    }
+    forYouEl.hidden = false;
+
+    const av = document.getElementById("fyAvatar");
+    av.classList.remove("open");
+    av.style.background = m.color;
+    av.textContent = initials(m.name);
+
+    const myReminders = [];
+    const myTasks = [];
+    dates.forEach((d, i) => {
+      visibleTasks(toKey(d)).forEach((t) => {
+        if (t.done) return;
+        if (t.kind === "reminder" && t.assignee === me) myReminders.push({ t, i });
+        else if (t.kind !== "reminder" && t.assignee === me) myTasks.push({ t, i });
+      });
+    });
+
+    const parts = [];
+    parts.push(myReminders.length === 1 ? "1 Erinnerung" : `${myReminders.length} Erinnerungen`);
+    parts.push(myTasks.length === 1 ? "1 offene Aufgabe" : `${myTasks.length} offene Aufgaben`);
+    document.getElementById("fySummary").textContent = parts.join(" · ");
+
+    fillFyList(document.getElementById("fyReminders"), myReminders, dates, "Keine Erinnerungen — alles ruhig.");
+    fillFyList(document.getElementById("fyTasks"), myTasks, dates, "Nichts zugewiesen — schnapp dir was vom Board.");
+  }
+
+  function fillFyList(listEl, items, dates, emptyText) {
+    listEl.innerHTML = "";
+    if (!items.length) {
+      const li = document.createElement("li");
+      li.className = "fy-empty";
+      li.textContent = emptyText;
+      listEl.appendChild(li);
+      return;
+    }
+    items.forEach(({ t, i }) => {
+      const li = document.createElement("li");
+      const btn = document.createElement("button");
+      btn.className = "fy-item";
+
+      const day = document.createElement("span");
+      day.className = "fy-day";
+      day.textContent = `${DAY_SHORT[i]} ${String(dates[i].getDate()).padStart(2, "0")}.`;
+
+      const text = document.createElement("span");
+      text.className = "fy-item-text";
+      text.textContent = t.text;
+
+      const meta = document.createElement("span");
+      meta.className = "fy-meta";
+      const sender = memberById(t.from);
+      meta.textContent = t.time || (t.kind === "reminder" && sender ? `von ${sender.name}` : t.private ? "privat" : "");
+
+      btn.append(day, text, meta);
+      btn.title = "Zum Tag springen";
+      btn.addEventListener("click", () => jumpToDay(i));
+      li.appendChild(btn);
+      listEl.appendChild(li);
+    });
+  }
+
+  function jumpToDay(idx) {
+    if (mobileQuery.matches) {
+      board.style.setProperty("--sx", idx > selectedDayIdx ? "36px" : "-36px");
+      selectedDayIdx = idx;
+      render();
+      board.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    const col = board.querySelectorAll(".day-col")[idx];
+    if (!col) return;
+    col.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    col.classList.add("flash");
+    col.addEventListener("animationend", () => col.classList.remove("flash"), { once: true });
   }
 
   function renderMemberStats(dates) {
