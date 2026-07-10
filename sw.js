@@ -1,4 +1,4 @@
-const VERSION = "wochenplaner-v1";
+const VERSION = "wochenplaner-v2";
 const CORE = [
   "./",
   "./index.html",
@@ -45,9 +45,10 @@ self.addEventListener("fetch", (e) => {
 
   if (url.origin !== location.origin) return;
 
-  // App-Shell: network-first so updates arrive, cache as offline fallback
+  // App-Shell: network-first (mit erzwungener Revalidierung, damit Updates
+  // nicht im HTTP-Cache hängen bleiben), Cache nur als Offline-Fallback
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request, { cache: "no-cache" })
       .then((res) => {
         const copy = res.clone();
         caches.open(VERSION).then((cache) => cache.put(e.request, copy));

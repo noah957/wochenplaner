@@ -866,6 +866,43 @@ body {
 .task.is-private .task-lock { display: block; }
 .task.is-private { border-style: dashed; }
 
+.task-bell {
+  width: 11px;
+  height: 11px;
+  color: var(--accent);
+  flex-shrink: 0;
+  display: none;
+}
+
+.task.is-reminder .task-bell { display: block; }
+
+.task.is-reminder {
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+}
+
+.task.is-reminder .task-bell {
+  animation: bellRing 2.6s var(--ease) infinite;
+  transform-origin: 50% 15%;
+}
+
+@keyframes bellRing {
+  0%, 12%, 100% { transform: rotate(0); }
+  3% { transform: rotate(13deg); }
+  6% { transform: rotate(-11deg); }
+  9% { transform: rotate(6deg); }
+}
+
+.task-from {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+  display: none;
+}
+
+.task.is-reminder .task-from { display: inline; }
+
 .task-time {
   font-size: 10.5px;
   font-weight: 600;
@@ -959,7 +996,8 @@ body {
   box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px var(--accent);
 }
 
-.lock-btn {
+.lock-btn,
+.bell-btn {
   flex-shrink: 0;
   width: 26px;
   height: 26px;
@@ -974,12 +1012,36 @@ body {
   transition: all 0.4s var(--ease);
 }
 
-.lock-btn svg { width: 12px; height: 12px; }
+.lock-btn svg, .bell-btn svg { width: 12px; height: 12px; }
 
 .lock-btn.on {
   background: var(--ink);
   border-color: var(--ink);
   color: var(--bg);
+}
+
+.bell-btn.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.me-avatar {
+  width: 20px;
+  height: 20px;
+  font-size: 9px;
+}
+
+#meBtn { padding: 7px; }
+
+.member-row.selectable { cursor: pointer; transition: border-color 0.4s var(--ease), background 0.4s var(--ease); }
+.member-row.selectable:hover { border-color: var(--line-strong); }
+.member-row.is-me { border-color: var(--accent); background: var(--accent-soft); }
+
+.me-check {
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .add-input {
@@ -1197,7 +1259,7 @@ body {
   .board.single-day .task-del { opacity: 0.55; width: 30px; height: 30px; }
   .board.single-day .task-assign { width: 22px; height: 22px; font-size: 9.5px; }
   .board.single-day .add-input { padding: 11px 13px; font-size: 14px; border-radius: 12px; }
-  .board.single-day .add-btn, .board.single-day .prio-btn, .board.single-day .lock-btn { width: 36px; height: 36px; }
+  .board.single-day .add-btn, .board.single-day .prio-btn, .board.single-day .lock-btn, .board.single-day .bell-btn { width: 36px; height: 36px; }
   .board.single-day .add-time { padding: 8px 10px; font-size: 13px; }
   .board.single-day .assign-chip .avatar { width: 27px; height: 27px; font-size: 10.5px; }
 

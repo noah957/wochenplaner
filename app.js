@@ -3,6 +3,7 @@
   const MEMBERS_KEY = "wochenplaner.members.v1";
   const THEME_KEY = "wochenplaner.theme";
   const PRIVACY_KEY = "wochenplaner.hidePrivate";
+  const ME_KEY = "wochenplaner.me.v1";
   const DAY_NAMES = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"];
   const DATE_FMT = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit" });
   const RANGE_FMT = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "long", year: "numeric" });
@@ -34,6 +35,7 @@
   let dragInfo = null;
   let filterMember = null; // null = alle, "open" = nicht zugewiesen, sonst member.id
   let hidePrivate = localStorage.getItem(PRIVACY_KEY) === "1";
+  let me = localStorage.getItem(ME_KEY) || null; // wer dieses Gerät benutzt
 
   const mobileQuery = window.matchMedia("(max-width: 640px)");
   let selectedDayIdx = (new Date().getDay() + 6) % 7; // heute vorausgewählt
@@ -104,11 +106,27 @@
     });
   }
 
-  function taskVisible(task) {
+  // Datenschutz-Sichtbarkeit: Erinnerungen sieht nur der Empfänger und
+  // der Absender. Gilt auch für alle Zähler, damit nichts durchsickert.
+  function canSee(task) {
     if (hidePrivate && task.private) return false;
+    if (task.kind === "reminder") {
+      const recipient = memberById(task.assignee);
+      if (!recipient) return true; // Empfänger gelöscht -> wieder für alle
+      return me === task.assignee || me === task.from;
+    }
+    return true;
+  }
+
+  function taskVisible(task) {
+    if (!canSee(task)) return false;
     if (filterMember === "open") return !task.assignee || !memberById(task.assignee);
     if (filterMember) return task.assignee === filterMember;
     return true;
+  }
+
+  function visibleTasks(dayKey) {
+    return (data[dayKey] || []).filter(canSee);
   }
 
   function render() {
@@ -136,7 +154,7 @@
       const list = frag.querySelector(".task-list");
       const tasks = sortTasks(data[key] || []).filter(taskVisible);
       renderTasks(list, key, tasks);
-      updateProgress(frag.querySelector(".day-progress"), data[key] || []);
+      updateProgress(frag.querySelector(".day-progress"), visibleTasks(key));
       setupDropZone(list, key);
       setupAddForm(frag.querySelector(".add-form"), key);
 
@@ -153,7 +171,7 @@
     const SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
     dates.forEach((date, i) => {
       const key = toKey(date);
-      const tasks = data[key] || [];
+      const tasks = visibleTasks(key);
       const chip = document.createElement("button");
       chip.className = "day-chip";
       if (i === selectedDayIdx) chip.classList.add("active");
@@ -256,6 +274,11 @@
       check.checked = task.done;
       if (task.done) li.classList.add("is-done");
       if (task.private) li.classList.add("is-private");
+      if (task.kind === "reminder") {
+        li.classList.add("is-reminder");
+        const sender = memberById(task.from);
+        frag.querySelector(".task-from").textContent = sender ? `von ${sender.name}` : "";
+      }
       timeEl.textContent = task.time || "";
       textEl.textContent = task.text;
       prioEl.dataset.p = task.prio || "none";
@@ -264,6 +287,12 @@
       assignBtn.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
+        if (task.kind === "reminder") {
+          const rec = memberById(task.assignee);
+          const sender = memberById(task.from);
+          showToast(`Erinnerung${sender ? ` von ${sender.name}` : ""}${rec ? ` an ${rec.name}` : ""} — nur ihr beide seht sie.`);
+          return;
+        }
         if (!members.length) {
           openFamModal();
           showToast("Lege zuerst eure Familienmitglieder an.");
@@ -287,10 +316,10 @@
         }
         const col = li.closest(".day-col");
         const chip = col.querySelector(".day-progress");
-        updateProgress(chip, data[dayKey] || []);
+        updateProgress(chip, visibleTasks(dayKey));
         updateWeekStats(weekDates(currentWeekStart), true);
         if (mobileQuery.matches) renderDayStrip(weekDates(currentWeekStart), toKey(new Date()));
-        if (task.done && (data[dayKey] || []).every((t) => t.done)) {
+        if (task.done && visibleTasks(dayKey).every((t) => t.done)) {
           confettiBurst(chip);
           showToast(`${dayNameFor(dayKey)} komplett erledigt ✨`);
         }
@@ -409,9 +438,11 @@
   function setupAddForm(form, dayKey) {
     const prioBtn = form.querySelector(".prio-btn");
     const lockBtn = form.querySelector(".lock-btn");
+    const bellBtn = form.querySelector(".bell-btn");
     const chipsEl = form.querySelector(".assign-chips");
     let selectedAssignee = null;
     let isPrivate = false;
+    let isReminder = false;
 
     members.forEach((m) => {
       const chip = document.createElement("button");
@@ -437,6 +468,26 @@
       lockBtn.title = isPrivate ? "Privat — nur mit Auge-Button sichtbar schaltbar" : "Als privat markieren";
     });
 
+    bellBtn.addEventListener("click", () => {
+      if (!isReminder) {
+        if (!members.length) {
+          openFamModal();
+          showToast("Lege zuerst eure Familienmitglieder an.");
+          return;
+        }
+        if (!me) {
+          openMeModal();
+          showToast("Sag mir zuerst, wer du bist — sonst weiß niemand, von wem die Erinnerung kommt.");
+          return;
+        }
+      }
+      isReminder = !isReminder;
+      bellBtn.classList.toggle("on", isReminder);
+      bellBtn.title = isReminder
+        ? "Erinnerung aktiv — wähle daneben aus, für wen sie ist"
+        : "Als Erinnerung senden (sieht nur der Empfänger)";
+    });
+
     prioBtn.addEventListener("click", () => {
       const cur = prioBtn.dataset.p || "none";
       const next = PRIO_ORDER[(PRIO_ORDER.indexOf(cur) + 1) % PRIO_ORDER.length];
@@ -450,6 +501,10 @@
       const timeInput = form.querySelector(".add-time");
       const text = input.value.trim();
       if (!text) return;
+      if (isReminder && !selectedAssignee) {
+        showToast("Für wen ist die Erinnerung? Tippe auf einen Avatar daneben.");
+        return;
+      }
       if (!data[dayKey]) data[dayKey] = [];
       data[dayKey].push({
         id: crypto.randomUUID(),
@@ -458,9 +513,15 @@
         prio: prioBtn.dataset.p || "none",
         assignee: selectedAssignee,
         private: isPrivate,
+        kind: isReminder ? "reminder" : "task",
+        from: isReminder ? me : null,
         done: false,
       });
       saveData();
+      if (isReminder) {
+        const rec = memberById(selectedAssignee);
+        showToast(`Erinnerung an ${rec ? rec.name : "?"} gespeichert 🔔`);
+      }
       animatedRender(() => {
         // refocus the same day's input for fast entry
         const cols = board.querySelectorAll(".day-col");
@@ -513,6 +574,11 @@
       del.addEventListener("click", () => {
         members = members.filter((x) => x.id !== m.id);
         if (filterMember === m.id) filterMember = null;
+        if (me === m.id) {
+          me = null;
+          localStorage.removeItem(ME_KEY);
+          paintMeBtn();
+        }
         saveMembers();
         renderMemberList();
         render();
@@ -535,7 +601,11 @@
     if (e.target === famModal) closeFamModal();
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !famModal.hidden) closeFamModal();
+    if (e.key === "Escape") {
+      if (!famModal.hidden) closeFamModal();
+      const meM = document.getElementById("meModal");
+      if (!meM.hidden) meM.hidden = true;
+    }
   });
 
   document.getElementById("memberForm").addEventListener("submit", (e) => {
@@ -549,6 +619,90 @@
     renderMemberList();
     render();
   });
+
+  /* ---------- "wer bist du?" (Profil pro Gerät) ---------- */
+
+  const meModal = document.getElementById("meModal");
+  const meBtn = document.getElementById("meBtn");
+
+  function paintMeBtn() {
+    const av = meBtn.querySelector(".me-avatar");
+    const m = memberById(me);
+    if (m) {
+      av.classList.remove("open");
+      av.style.background = m.color;
+      av.textContent = initials(m.name);
+      meBtn.title = `Du bist ${m.name} — tippen zum Wechseln`;
+    } else {
+      av.classList.add("open");
+      av.style.background = "";
+      av.textContent = "?";
+      meBtn.title = "Wer bist du? Tippen zum Auswählen";
+    }
+  }
+
+  function openMeModal() {
+    renderMeList();
+    meModal.hidden = false;
+  }
+
+  function closeMeModal() {
+    meModal.hidden = true;
+  }
+
+  function renderMeList() {
+    const list = document.getElementById("meList");
+    list.innerHTML = "";
+    if (!members.length) {
+      const empty = document.createElement("li");
+      empty.className = "member-empty";
+      empty.textContent = "Lege zuerst unter „Familie“ eure Mitglieder an.";
+      list.appendChild(empty);
+      return;
+    }
+    members.forEach((m, i) => {
+      const li = document.createElement("li");
+      li.className = "member-row selectable";
+      if (m.id === me) li.classList.add("is-me");
+      li.style.animationDelay = `${i * 45}ms`;
+
+      const av = document.createElement("span");
+      av.className = "avatar";
+      av.style.background = m.color;
+      av.textContent = initials(m.name);
+
+      const name = document.createElement("span");
+      name.className = "member-name";
+      name.textContent = m.name;
+
+      li.append(av, name);
+      if (m.id === me) {
+        const check = document.createElement("span");
+        check.className = "me-check";
+        check.textContent = "✓";
+        li.appendChild(check);
+      }
+
+      li.addEventListener("click", () => {
+        me = m.id;
+        localStorage.setItem(ME_KEY, me);
+        paintMeBtn();
+        closeMeModal();
+        showToast(`Hallo, ${m.name}! 👋`);
+        animatedRender();
+      });
+
+      list.appendChild(li);
+    });
+  }
+
+  meBtn.addEventListener("click", openMeModal);
+  document.getElementById("meClose").addEventListener("click", closeMeModal);
+  meModal.addEventListener("click", (e) => {
+    if (e.target === meModal) closeMeModal();
+  });
+
+  paintMeBtn();
 
   /* ---------- privacy toggle ---------- */
 
@@ -582,7 +736,7 @@
     let total = 0;
     let done = 0;
     dates.forEach((d) => {
-      const tasks = data[toKey(d)] || [];
+      const tasks = visibleTasks(toKey(d));
       total += tasks.length;
       done += tasks.filter((t) => t.done).length;
     });
@@ -604,7 +758,7 @@
     memberStatsEl.hidden = false;
 
     const weekTasks = [];
-    dates.forEach((d) => weekTasks.push(...(data[toKey(d)] || [])));
+    dates.forEach((d) => weekTasks.push(...visibleTasks(toKey(d))));
 
     const mkChip = (id, avatarEl, label, count) => {
       const chip = document.createElement("button");
@@ -625,14 +779,14 @@
       return chip;
     };
 
-    const openTasks = weekTasks.filter((t) => (!t.assignee || !memberById(t.assignee)) && !t.done && !(hidePrivate && t.private));
+    const openTasks = weekTasks.filter((t) => (!t.assignee || !memberById(t.assignee)) && !t.done);
     const openAv = document.createElement("span");
     openAv.className = "avatar open";
     openAv.textContent = "?";
     memberStatsEl.appendChild(mkChip("open", openAv, "Offen", `${openTasks.length}`));
 
     members.forEach((m) => {
-      const mine = weekTasks.filter((t) => t.assignee === m.id && !(hidePrivate && t.private));
+      const mine = weekTasks.filter((t) => t.assignee === m.id);
       const doneCount = mine.filter((t) => t.done).length;
       const av = document.createElement("span");
       av.className = "avatar";
@@ -801,6 +955,8 @@
           prio: t.prio || "none",
           assignee: t.assignee || null,
           private: !!t.private,
+          kind: t.kind || "task",
+          from: t.from || null,
           done: false,
         });
         copied++;
@@ -813,9 +969,11 @@
 
   render();
 
-  // sanfter Hinweis beim ersten Start ohne Mitglieder
+  // sanfter Hinweis beim ersten Start ohne Mitglieder / ohne Profil
   if (!members.length) {
     setTimeout(() => showToast("Tipp: Lege unter „Familie“ an, wer bei euch mitmacht."), 900);
+  } else if (!me) {
+    setTimeout(() => showToast("Tipp: Tippe oben auf „?“ und sag mir, wer du bist."), 900);
   }
 
   // PWA: offline-fähig, als App installierbar

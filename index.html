@@ -41,6 +41,7 @@
       </div>
 
       <div class="actions">
+        <button id="meBtn" class="pill-btn icon-only" title="Wer bist du?"><span class="avatar open me-avatar">?</span></button>
         <button id="todayBtn" class="pill-btn">Heute</button>
         <button id="copyPrevBtn" class="pill-btn cta" title="Offene Aufgaben der Vorwoche übernehmen">
           <span>Vorwoche übernehmen</span>
@@ -94,6 +95,22 @@
     </div>
   </div>
 
+  <div id="meModal" class="modal-overlay" hidden>
+    <div class="modal">
+      <header class="modal-head">
+        <div>
+          <span class="eyebrow">Profil</span>
+          <h2>Wer bist du?</h2>
+        </div>
+        <button id="meClose" class="pill-btn icon-only" title="Schließen">
+          <svg viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+        </button>
+      </header>
+      <ul id="meList" class="member-list"></ul>
+      <p class="modal-hint">Deine Wahl gilt für dieses Gerät. Erinnerungen, die an dich gerichtet sind, siehst nur du — und wer sie geschrieben hat.</p>
+    </div>
+  </div>
+
   <div id="toast" class="toast" hidden></div>
 
   <nav id="dayStrip" class="day-strip" hidden aria-label="Tag wählen"></nav>
@@ -115,6 +132,9 @@
           <input type="text" class="add-input" placeholder="Neue Aufgabe…" autocomplete="off">
           <div class="assign-row">
             <div class="assign-chips"></div>
+            <button type="button" class="bell-btn" title="Als Erinnerung senden (sieht nur der Empfänger)">
+              <svg viewBox="0 0 16 16" fill="none"><path d="M8 2.2a4 4 0 0 0-4 4v2.6L2.8 11h10.4L12 8.8V6.2a4 4 0 0 0-4-4Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/><path d="M6.6 13a1.5 1.5 0 0 0 2.8 0" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
+            </button>
             <button type="button" class="lock-btn" title="Als privat markieren">
               <svg viewBox="0 0 16 16" fill="none"><rect x="3.5" y="7" width="9" height="6" rx="1.5" stroke="currentColor" stroke-width="1.1"/><path d="M5.5 7V5.5a2.5 2.5 0 0 1 5 0V7" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
             </button>
@@ -144,6 +164,8 @@
             <button type="button" class="task-assign" title="Wer übernimmt das?">?</button>
             <span class="task-prio"></span>
             <span class="task-time"></span>
+            <svg class="task-bell" viewBox="0 0 16 16" fill="none" aria-label="Erinnerung"><path d="M8 2.2a4 4 0 0 0-4 4v2.6L2.8 11h10.4L12 8.8V6.2a4 4 0 0 0-4-4Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M6.6 13a1.5 1.5 0 0 0 2.8 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            <span class="task-from"></span>
             <svg class="task-lock" viewBox="0 0 16 16" fill="none" aria-label="Privat"><rect x="3.5" y="7" width="9" height="6" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M5.5 7V5.5a2.5 2.5 0 0 1 5 0V7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
           </span>
         </span>
