@@ -805,6 +805,10 @@
   const DAY_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 
   forYouToggle.addEventListener("click", () => {
+    if (forYouToggle.dataset.mode === "pick") {
+      openMeModal();
+      return;
+    }
     fyOpen = !fyOpen;
     forYouPanel.hidden = !fyOpen;
     forYouToggle.setAttribute("aria-expanded", String(fyOpen));
@@ -812,11 +816,25 @@
 
   function renderForYou(dates) {
     const m = memberById(me);
-    if (!m) {
+    if (!members.length) {
       forYouEl.hidden = true;
       return;
     }
     forYouEl.hidden = false;
+
+    // ohne Profil: sichtbare Einladung statt leerem Bereich
+    if (!m) {
+      const av0 = document.getElementById("fyAvatar");
+      av0.classList.add("open");
+      av0.style.background = "";
+      av0.textContent = "?";
+      document.getElementById("fySummary").textContent = "Tippe hier und sag uns, wer du bist — dann siehst du deine Woche auf einen Blick.";
+      forYouPanel.hidden = true;
+      forYouToggle.setAttribute("aria-expanded", "false");
+      forYouToggle.dataset.mode = "pick";
+      return;
+    }
+    forYouToggle.dataset.mode = "";
 
     const av = document.getElementById("fyAvatar");
     av.classList.remove("open");
