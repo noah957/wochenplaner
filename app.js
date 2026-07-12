@@ -4,6 +4,8 @@
   const THEME_KEY = "wochenplaner.theme";
   const PRIVACY_KEY = "wochenplaner.hidePrivate";
   const ME_KEY = "wochenplaner.me.v1";
+  const ROUTINES_KEY = "wochenplaner.routines.v1";
+  const SKIPS_KEY = "wochenplaner.routineSkips.v1";
   const DAY_NAMES = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"];
   const DATE_FMT = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit" });
   const RANGE_FMT = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "long", year: "numeric" });
@@ -31,6 +33,8 @@
 
   let data = loadJSON(STORAGE_KEY, {});
   let members = loadJSON(MEMBERS_KEY, []);
+  let routines = loadJSON(ROUTINES_KEY, []);
+  let routineSkips = new Set(loadJSON(SKIPS_KEY, []));
   let currentWeekStart = startOfWeek(new Date());
   let dragInfo = null;
   let filterMember = null; // null = alle, "open" = nicht zugewiesen, sonst member.id
@@ -58,6 +62,41 @@
 
   function saveMembers() {
     localStorage.setItem(MEMBERS_KEY, JSON.stringify(members));
+  }
+
+  function saveRoutines() {
+    localStorage.setItem(ROUTINES_KEY, JSON.stringify(routines));
+    localStorage.setItem(SKIPS_KEY, JSON.stringify([...routineSkips]));
+  }
+
+  // Routinen für die angezeigte Woche anlegen (einmal pro Woche, überspringt Gelöschtes)
+  function materializeRoutines(weekStart) {
+    if (!routines.length) return;
+    const weekKey = toKey(weekStart);
+    let changed = false;
+    routines.forEach((r) => {
+      if (r.createdWeek && weekKey < r.createdWeek) return;
+      if (routineSkips.has(`${r.id}:${weekKey}`)) return;
+      const d = new Date(weekStart);
+      d.setDate(d.getDate() + r.dayIdx);
+      const dayKey = toKey(d);
+      if ((data[dayKey] || []).some((t) => t.routineId === r.id)) return;
+      if (!data[dayKey]) data[dayKey] = [];
+      data[dayKey].push({
+        id: crypto.randomUUID(),
+        routineId: r.id,
+        text: r.text,
+        time: r.time || "",
+        prio: r.prio || "none",
+        assignee: r.assignee || null,
+        private: !!r.private,
+        kind: r.kind || "task",
+        from: r.from || null,
+        done: false,
+      });
+      changed = true;
+    });
+    if (changed) saveData();
   }
 
   function memberById(id) {
@@ -139,6 +178,7 @@
   }
 
   function render() {
+    materializeRoutines(currentWeekStart);
     board.innerHTML = "";
     const dates = weekDates(currentWeekStart);
     const todayKey = toKey(new Date());
@@ -325,6 +365,7 @@
         const sender = memberById(task.from);
         frag.querySelector(".task-from").textContent = sender ? `von ${sender.name}` : "";
       }
+      if (task.routineId) li.classList.add("is-routine");
       timeEl.textContent = task.time || "";
       textEl.textContent = task.text;
       prioEl.dataset.p = task.prio || "none";
@@ -373,8 +414,23 @@
 
       delBtn.addEventListener("click", () => {
         data[dayKey] = (data[dayKey] || []).filter((t) => t.id !== task.id);
+        const skipKey = task.routineId ? `${task.routineId}:${toKey(currentWeekStart)}` : null;
+        if (skipKey) routineSkips.add(skipKey);
         saveData();
+        saveRoutines();
         animatedRender();
+        showToast(
+          task.routineId ? "Routine diese Woche übersprungen." : "Aufgabe gelöscht.",
+          "Rückgängig",
+          () => {
+            if (!data[dayKey]) data[dayKey] = [];
+            data[dayKey].push(task);
+            if (skipKey) routineSkips.delete(skipKey);
+            saveData();
+            saveRoutines();
+            animatedRender();
+          }
+        );
       });
 
       // inline edit on double-click
@@ -485,10 +541,18 @@
     const prioBtn = form.querySelector(".prio-btn");
     const lockBtn = form.querySelector(".lock-btn");
     const bellBtn = form.querySelector(".bell-btn");
+    const repeatBtn = form.querySelector(".repeat-btn");
     const chipsEl = form.querySelector(".assign-chips");
     let selectedAssignee = null;
     let isPrivate = false;
     let isReminder = false;
+    let isRepeating = false;
+
+    repeatBtn.addEventListener("click", () => {
+      isRepeating = !isRepeating;
+      repeatBtn.classList.toggle("on", isRepeating);
+      repeatBtn.title = isRepeating ? "Routine aktiv — erscheint jede Woche an diesem Tag" : "Jede Woche wiederholen";
+    });
 
     members.forEach((m) => {
       const chip = document.createElement("button");
@@ -552,7 +616,7 @@
         return;
       }
       if (!data[dayKey]) data[dayKey] = [];
-      data[dayKey].push({
+      const newTask = {
         id: crypto.randomUUID(),
         text,
         time: timeInput.value || "",
@@ -562,11 +626,33 @@
         kind: isReminder ? "reminder" : "task",
         from: isReminder ? me : null,
         done: false,
-      });
+      };
+      if (isRepeating) {
+        const dates = weekDates(currentWeekStart);
+        const dayIdx = dates.findIndex((d) => toKey(d) === dayKey);
+        const routine = {
+          id: crypto.randomUUID(),
+          text: newTask.text,
+          time: newTask.time,
+          prio: newTask.prio,
+          assignee: newTask.assignee,
+          private: newTask.private,
+          kind: newTask.kind,
+          from: newTask.from,
+          dayIdx: Math.max(0, dayIdx),
+          createdWeek: toKey(currentWeekStart),
+        };
+        routines.push(routine);
+        newTask.routineId = routine.id;
+        saveRoutines();
+      }
+      data[dayKey].push(newTask);
       saveData();
       if (isReminder) {
         const rec = memberById(selectedAssignee);
         showToast(`Erinnerung an ${rec ? rec.name : "?"} gespeichert 🔔`);
+      } else if (isRepeating) {
+        showToast(`Routine angelegt — erscheint jetzt jede Woche.`);
       }
       animatedRender(() => {
         // refocus the same day's input for fast entry
@@ -582,8 +668,49 @@
 
   function openFamModal() {
     renderMemberList();
+    renderRoutineList();
     famModal.hidden = false;
     document.getElementById("memberName").focus();
+  }
+
+  function renderRoutineList() {
+    const section = document.getElementById("routineSection");
+    const list = document.getElementById("routineList");
+    section.hidden = !routines.length;
+    list.innerHTML = "";
+    const SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+    routines.forEach((r, i) => {
+      const li = document.createElement("li");
+      li.className = "member-row";
+      li.style.animationDelay = `${i * 40}ms`;
+
+      const day = document.createElement("span");
+      day.className = "routine-day";
+      day.textContent = SHORT[r.dayIdx] || "?";
+
+      const name = document.createElement("span");
+      name.className = "member-name";
+      name.textContent = r.text + (r.time ? ` · ${r.time}` : "");
+
+      const del = document.createElement("button");
+      del.className = "member-del";
+      del.title = "Routine beenden";
+      del.innerHTML = '<svg viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+      del.addEventListener("click", () => {
+        const removed = r;
+        routines = routines.filter((x) => x.id !== r.id);
+        saveRoutines();
+        renderRoutineList();
+        showToast("Routine beendet — bestehende Einträge bleiben.", "Rückgängig", () => {
+          routines.push(removed);
+          saveRoutines();
+          renderRoutineList();
+        });
+      });
+
+      li.append(day, name, del);
+      list.appendChild(li);
+    });
   }
 
   function closeFamModal() {
@@ -749,6 +876,71 @@
   });
 
   paintMeBtn();
+
+  /* ---------- Daten sichern & laden ---------- */
+
+  document.getElementById("exportBtn").addEventListener("click", () => {
+    const backup = {
+      app: "wochenplaner",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      tasks: data,
+      members,
+      routines,
+      routineSkips: [...routineSkips],
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `wochenplaner-sicherung-${toKey(new Date())}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    showToast("Sicherung heruntergeladen.");
+  });
+
+  const importFile = document.getElementById("importFile");
+  document.getElementById("importBtn").addEventListener("click", () => importFile.click());
+
+  importFile.addEventListener("change", () => {
+    const file = importFile.files[0];
+    importFile.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const backup = JSON.parse(reader.result);
+        if (backup.app !== "wochenplaner" || typeof backup.tasks !== "object") {
+          showToast("Das ist keine gültige Wochenplaner-Sicherung.");
+          return;
+        }
+        const prev = { data, members, routines, skips: [...routineSkips] };
+        data = backup.tasks || {};
+        members = backup.members || [];
+        routines = backup.routines || [];
+        routineSkips = new Set(backup.routineSkips || []);
+        saveData();
+        saveMembers();
+        saveRoutines();
+        paintMeBtn();
+        closeFamModal();
+        render();
+        showToast("Sicherung geladen.", "Rückgängig", () => {
+          data = prev.data;
+          members = prev.members;
+          routines = prev.routines;
+          routineSkips = new Set(prev.skips);
+          saveData();
+          saveMembers();
+          saveRoutines();
+          paintMeBtn();
+          render();
+        });
+      } catch {
+        showToast("Die Datei konnte nicht gelesen werden.");
+      }
+    };
+    reader.readAsText(file);
+  });
 
   /* ---------- privacy toggle ---------- */
 
@@ -946,14 +1138,29 @@
     openAv.textContent = "?";
     memberStatsEl.appendChild(mkChip("open", openAv, "Offen", `${openTasks.length}`));
 
+    // Wochen-Champion: wer am meisten erledigt hat, bekommt die Krone
+    const doneCounts = new Map(members.map((m) => [m.id, weekTasks.filter((t) => t.assignee === m.id && t.done).length]));
+    const maxDone = Math.max(0, ...doneCounts.values());
+    const champions = maxDone > 0 ? members.filter((m) => doneCounts.get(m.id) === maxDone) : [];
+    const isChampion = (m) => champions.length === 1 && champions[0].id === m.id;
+
     members.forEach((m) => {
       const mine = weekTasks.filter((t) => t.assignee === m.id);
-      const doneCount = mine.filter((t) => t.done).length;
+      const doneCount = doneCounts.get(m.id);
       const av = document.createElement("span");
       av.className = "avatar";
       av.style.background = m.color;
       av.textContent = initials(m.name);
-      memberStatsEl.appendChild(mkChip(m.id, av, m.name, `${doneCount}/${mine.length}`));
+      const chip = mkChip(m.id, av, m.name, `${doneCount}/${mine.length}`);
+      if (isChampion(m)) {
+        const crown = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        crown.setAttribute("viewBox", "0 0 16 16");
+        crown.setAttribute("class", "crown");
+        crown.innerHTML = '<path d="M2.5 5.5 5 8l3-4 3 4 2.5-2.5-1 7h-9l-1-7Z" fill="currentColor"/>';
+        chip.insertBefore(crown, chip.children[1]);
+        chip.title = `${m.name} ist Wochen-Champion! · ${chip.title}`;
+      }
+      memberStatsEl.appendChild(chip);
     });
   }
 
@@ -1015,17 +1222,32 @@
   }
 
   let toastTimer = null;
-  function showToast(message) {
+  function showToast(message, actionLabel, onAction) {
     const toast = document.getElementById("toast");
-    toast.textContent = message;
+    toast.textContent = "";
+    const msg = document.createElement("span");
+    msg.textContent = message;
+    toast.appendChild(msg);
+    if (actionLabel && onAction) {
+      const btn = document.createElement("button");
+      btn.className = "toast-action";
+      btn.textContent = actionLabel;
+      btn.addEventListener("click", () => {
+        onAction();
+        toast.hidden = true;
+        clearTimeout(toastTimer);
+      });
+      toast.appendChild(btn);
+    }
     toast.classList.remove("out");
     toast.hidden = false;
     void toast.offsetWidth; // restart the entry animation
     clearTimeout(toastTimer);
+    const dauer = actionLabel ? 5000 : 2400; // mit Rückgängig etwas länger zeigen
     toastTimer = setTimeout(() => {
       toast.classList.add("out");
       toastTimer = setTimeout(() => { toast.hidden = true; }, 380);
-    }, 2400);
+    }, dauer);
   }
 
   /* ---------- theme ---------- */

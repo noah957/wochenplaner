@@ -698,6 +698,75 @@ body {
   color: var(--ink-soft);
 }
 
+.routine-section { margin-top: 16px; }
+
+.modal-subhead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.modal-subhead svg { width: 12px; height: 12px; color: var(--prio-low); }
+
+.routine-day {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--prio-low);
+}
+
+.backup-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.backup-row .pill-btn { flex: 1; justify-content: center; font-size: 12px; }
+
+/* Toast mit Aktions-Button (Rückgängig) */
+.toast[hidden] { display: none; }
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.toast-action {
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.3s var(--ease);
+}
+
+.toast-action:hover { background: var(--accent-soft); }
+
+/* Wochen-Champion-Krone */
+.crown {
+  width: 13px;
+  height: 13px;
+  color: var(--prio-med);
+  flex-shrink: 0;
+  margin-right: -2px;
+}
+
 /* ---------- day strip (mobile) ---------- */
 
 .day-strip[hidden] { display: none; }
@@ -1113,6 +1182,16 @@ body {
   display: none;
 }
 
+.task-repeat {
+  width: 11px;
+  height: 11px;
+  color: var(--prio-low);
+  flex-shrink: 0;
+  display: none;
+}
+
+.task.is-routine .task-repeat { display: block; }
+
 .task.is-reminder .task-bell { display: block; }
 
 .task.is-reminder {
@@ -1263,6 +1342,29 @@ body {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-ink);
+}
+
+.repeat-btn {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--ink-soft);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.4s var(--ease);
+}
+
+.repeat-btn svg { width: 12px; height: 12px; }
+
+.repeat-btn.on {
+  background: var(--prio-low);
+  border-color: var(--prio-low);
+  color: #fff;
 }
 
 .me-avatar {
