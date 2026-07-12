@@ -212,8 +212,48 @@
 
     weekRangeEl.textContent = `${RANGE_FMT.format(dates[0])} – ${RANGE_FMT.format(dates[6])}`;
     weekNumberEl.textContent = `KW ${isoWeekNumber(dates[0])}`;
+    animateWeekLabel(toKey(dates[0]));
     updateWeekStats(dates);
+    updateScrollFade();
+    updateWelcome();
   }
+
+  /* Wochenlabel sanft überblenden, wenn die Woche wechselt */
+  let lastWeekKey = null;
+  function animateWeekLabel(weekKey) {
+    if (lastWeekKey !== null && lastWeekKey !== weekKey && !reducedMotion) {
+      weekRangeEl.parentElement.animate(
+        [{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "translateY(0)" }],
+        { duration: 380, easing: "cubic-bezier(0.22, 1, 0.36, 1)" }
+      );
+    }
+    lastWeekKey = weekKey;
+  }
+
+  /* weiche Kanten, wenn das Board horizontal scrollt */
+  function updateScrollFade() {
+    board.classList.toggle("can-scroll", board.scrollWidth > board.clientWidth + 4);
+  }
+
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(updateScrollFade, 150);
+  });
+
+  /* Willkommens-Karte nur beim allerersten Start */
+  function updateWelcome() {
+    const isEmpty = !members.length && !Object.values(data).some((list) => list.length);
+    document.getElementById("welcome").hidden = !isEmpty || welcomeDismissed;
+  }
+
+  let welcomeDismissed = sessionStorage.getItem("wochenplaner.welcomeSkip") === "1";
+  document.getElementById("welcomeFam").addEventListener("click", () => openFamModal());
+  document.getElementById("welcomeSkip").addEventListener("click", () => {
+    welcomeDismissed = true;
+    sessionStorage.setItem("wochenplaner.welcomeSkip", "1");
+    updateWelcome();
+  });
 
   function renderDayStrip(dates, todayKey) {
     dayStrip.innerHTML = "";
@@ -400,6 +440,7 @@
         if (task.done) {
           li.classList.add("just-done");
           li.addEventListener("animationend", () => li.classList.remove("just-done"), { once: true });
+          if (navigator.vibrate && !reducedMotion) navigator.vibrate(12);
         }
         const col = li.closest(".day-col");
         const chip = col.querySelector(".day-progress");
@@ -408,6 +449,7 @@
         if (mobileQuery.matches) renderDayStrip(weekDates(currentWeekStart), toKey(new Date()));
         if (task.done && visibleTasks(dayKey).every((t) => t.done)) {
           confettiBurst(chip);
+          if (navigator.vibrate && !reducedMotion) navigator.vibrate([16, 60, 24]);
           showToast(`${dayNameFor(dayKey)} komplett erledigt ✨`);
         }
       });
@@ -1381,6 +1423,16 @@
       });
     });
   }
+
+  // kompakter Header beim Scrollen (per Sentinel, ohne Scroll-Listener)
+  const island = document.querySelector(".island");
+  const sentinel = document.createElement("div");
+  sentinel.style.cssText = "position:absolute;top:0;left:0;width:1px;height:1px;pointer-events:none;";
+  document.body.prepend(sentinel);
+  new IntersectionObserver(
+    ([entry]) => island.classList.toggle("compact", !entry.isIntersecting),
+    { rootMargin: "60px 0px 0px 0px" }
+  ).observe(sentinel);
 
   // PWA: offline-fähig, als App installierbar
   if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {

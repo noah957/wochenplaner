@@ -29,8 +29,11 @@
   <header class="island">
     <div class="island-row">
       <div class="brand">
-        <span class="eyebrow" data-hero-fade style="--hf: 0">Planer</span>
-        <h1><span class="reveal-line"><span>Wochenplaner</span></span></h1>
+        <img class="brand-icon" src="icons/icon-192.png" alt="" width="38" height="38" data-hero-fade style="--hf: 0">
+        <div>
+          <span class="eyebrow" data-hero-fade style="--hf: 0">Planer</span>
+          <h1><span class="reveal-line"><span>Wochenplaner</span></span></h1>
+        </div>
       </div>
 
       <div class="nav-controls" data-hero-fade style="--hf: 1">
@@ -156,6 +159,23 @@
   </div>
 
   <div id="toast" class="toast" hidden></div>
+
+  <section id="welcome" class="welcome" hidden>
+    <img src="assets/empty.png" alt="" width="108" height="108">
+    <div>
+      <h2>Willkommen bei eurem Wochenplaner</h2>
+      <p>Plant Haushaltsaufgaben gemeinsam, verteilt sie per Antippen und schickt euch persönliche Erinnerungen. Legt zuerst fest, wer bei euch mitmacht.</p>
+      <div class="welcome-actions">
+        <button id="welcomeFam" class="pill-btn cta">
+          <span>Familie anlegen</span>
+          <span class="cta-icon">
+            <svg viewBox="0 0 16 16" fill="none"><path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+          </span>
+        </button>
+        <button id="welcomeSkip" class="pill-btn">Erst mal umschauen</button>
+      </div>
+    </div>
+  </section>
 
   <nav id="dayStrip" class="day-strip" hidden aria-label="Tag wählen"></nav>
 
