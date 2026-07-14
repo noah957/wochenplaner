@@ -198,7 +198,20 @@
       if (key === todayKey) col.classList.add("is-today");
 
       frag.querySelector(".day-name").textContent = DAY_NAMES[i];
+      if (key === todayKey) {
+        const tag = document.createElement("span");
+        tag.className = "today-tag";
+        tag.textContent = "Heute";
+        frag.querySelector(".day-name").appendChild(tag);
+      }
       frag.querySelector(".day-date").textContent = DATE_FMT.format(date);
+
+      // Composer: Formular erst auf Klick zeigen
+      const ghost = frag.querySelector(".add-ghost");
+      ghost.addEventListener("click", () => {
+        col.classList.add("composing");
+        col.querySelector(".add-input").focus();
+      });
 
       const list = frag.querySelector(".task-list");
       const tasks = sortTasks(data[key] || []).filter(taskVisible);
@@ -647,6 +660,13 @@
       prioBtn.title = { none: "Keine Priorität", low: "Niedrige Priorität", med: "Mittlere Priorität", high: "Hohe Priorität" }[next];
     });
 
+    // Escape schließt den Composer
+    form.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        form.closest(".day-col").classList.remove("composing");
+      }
+    });
+
     form.addEventListener("submit", (e) => {
       e.preventDefault();
       const input = form.querySelector(".add-input");
@@ -697,11 +717,15 @@
         showToast(`Routine angelegt — erscheint jetzt jede Woche.`);
       }
       animatedRender(() => {
-        // refocus the same day's input for fast entry
+        // Composer offen halten und für schnelle Eingabe neu fokussieren
         const cols = board.querySelectorAll(".day-col");
         const dates = weekDates(currentWeekStart);
         const idx = dates.findIndex((d) => toKey(d) === dayKey);
-        if (idx >= 0) cols[idx]?.querySelector(".add-input")?.focus();
+        const col = mobileQuery.matches ? cols[0] : cols[idx];
+        if (col) {
+          col.classList.add("composing");
+          col.querySelector(".add-input")?.focus();
+        }
       });
     });
   }

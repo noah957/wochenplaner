@@ -1,4 +1,4 @@
-const VERSION = "wochenplaner-v6";
+const VERSION = "wochenplaner-v7";
 const CORE = [
   "./",
   "./index.html",
