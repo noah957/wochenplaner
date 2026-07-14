@@ -239,6 +239,48 @@
     updateWeekStats(dates);
     updateScrollFade();
     updateWelcome();
+    updateSuggestions();
+  }
+
+  /* Eingabe-Vorschläge: lernen aus euren bisherigen Aufgaben */
+  const DEFAULT_SUGGESTIONS = [
+    "Staubsaugen", "Müll rausbringen", "Wocheneinkauf", "Wäsche waschen",
+    "Spülmaschine ausräumen", "Bad putzen", "Kochen", "Blumen gießen",
+    "Betten frisch beziehen", "Altglas wegbringen",
+  ];
+
+  function updateSuggestions() {
+    const counts = new Map();
+    Object.values(data).forEach((list) =>
+      list.forEach((t) => {
+        const text = (t.text || "").trim();
+        if (!text) return;
+        const k = text.toLowerCase();
+        const e = counts.get(k) || { text, n: 0, last: 0 };
+        e.n++;
+        e.last = Math.max(e.last, t.u || 0);
+        counts.set(k, e);
+      })
+    );
+    // häufig Genutztes zuerst, danach die Standard-Ideen
+    const own = [...counts.values()]
+      .sort((a, b) => b.n - a.n || b.last - a.last)
+      .map((e) => e.text);
+    const seen = new Set();
+    const final = [...own, ...DEFAULT_SUGGESTIONS].filter((t) => {
+      const k = t.toLowerCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    }).slice(0, 20);
+
+    const dl = document.getElementById("choreSuggestions");
+    dl.innerHTML = "";
+    final.forEach((t) => {
+      const o = document.createElement("option");
+      o.value = t;
+      dl.appendChild(o);
+    });
   }
 
   /* Wochenlabel sanft überblenden, wenn die Woche wechselt */
@@ -885,9 +927,21 @@
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       if (!famModal.hidden) closeFamModal();
-      const meM = document.getElementById("meModal");
-      if (!meM.hidden) meM.hidden = true;
+      ["meModal", "helpModal", "joinModal"].forEach((id) => {
+        const m = document.getElementById(id);
+        if (!m.hidden) m.hidden = true;
+      });
     }
+  });
+
+  /* ---------- Anleitung ---------- */
+
+  const helpModal = document.getElementById("helpModal");
+  document.getElementById("helpBtn").addEventListener("click", () => { helpModal.hidden = false; });
+  document.getElementById("helpClose").addEventListener("click", () => { helpModal.hidden = true; });
+  document.getElementById("welcomeHelp").addEventListener("click", () => { helpModal.hidden = false; });
+  helpModal.addEventListener("click", (e) => {
+    if (e.target === helpModal) helpModal.hidden = true;
   });
 
   document.getElementById("memberForm").addEventListener("submit", (e) => {
@@ -1247,18 +1301,39 @@
     showToast("Gruppe verlassen — eure Daten bleiben auf diesem Gerät.", "Rückgängig", () => setGroup(old));
   });
 
-  // Beitritt über einen geteilten Link (#join=…)
-  const joinFromUrl = parseJoinCode(location.hash);
-  if (joinFromUrl) {
-    history.replaceState(null, "", location.pathname + location.search);
-    if (group && group.bucket === joinFromUrl.bucket) {
+  // Beitritt über einen geteilten Link (#join=…) — echter Dialog, kein flüchtiger Toast.
+  // Läuft beim Laden UND bei jeder Hash-Änderung (Link in bereits offener App geöffnet).
+  let pendingJoin = null;
+
+  function maybeOfferJoin() {
+    const g = parseJoinCode(location.hash);
+    if (!g) return;
+    const clearHash = () => history.replaceState(null, "", location.pathname + location.search);
+    if (group && group.bucket === g.bucket) {
+      clearHash();
       showToast("Du bist schon in dieser Gruppe.");
-    } else {
-      setTimeout(() => {
-        showToast("Einladung zur Familien-Gruppe gefunden!", "Beitreten", () => joinGroup(joinFromUrl));
-      }, 600);
+      return;
     }
+    pendingJoin = g;
+    document.getElementById("joinModal").hidden = false;
   }
+
+  document.getElementById("joinAccept").addEventListener("click", () => {
+    document.getElementById("joinModal").hidden = true;
+    history.replaceState(null, "", location.pathname + location.search);
+    if (pendingJoin) joinGroup(pendingJoin);
+    pendingJoin = null;
+  });
+
+  document.getElementById("joinDecline").addEventListener("click", () => {
+    document.getElementById("joinModal").hidden = true;
+    history.replaceState(null, "", location.pathname + location.search);
+    pendingJoin = null;
+    showToast("Kein Problem — der Link funktioniert jederzeit wieder.");
+  });
+
+  window.addEventListener("hashchange", maybeOfferJoin);
+  maybeOfferJoin();
 
   // regelmäßig abgleichen, solange die App sichtbar ist
   if (group) setTimeout(pullNow, 800);

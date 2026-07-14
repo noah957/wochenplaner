@@ -780,6 +780,58 @@ body {
   color: var(--ink-soft);
 }
 
+/* ---------- Anleitung & Beitritts-Dialog ---------- */
+
+.help-modal {
+  max-width: 480px;
+  max-height: min(84dvh, 700px);
+  display: flex;
+  flex-direction: column;
+}
+
+.help-body {
+  overflow-y: auto;
+  padding-right: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.help-section { margin-bottom: 18px; }
+.help-section:last-child { margin-bottom: 4px; }
+
+.help-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-family: "Fraunces", serif;
+  font-weight: 550;
+  font-size: 15px;
+}
+
+.help-section h3 svg {
+  width: 15px;
+  height: 15px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.help-section p {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+.help-section strong { color: var(--ink); font-weight: 600; }
+
+.join-text {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
 .routine-section { margin-top: 16px; }
 
 .modal-subhead {
