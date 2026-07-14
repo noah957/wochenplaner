@@ -931,6 +931,7 @@
         const m = document.getElementById(id);
         if (!m.hidden) m.hidden = true;
       });
+      if (tourEls) endTour();
     }
   });
 
@@ -939,9 +940,157 @@
   const helpModal = document.getElementById("helpModal");
   document.getElementById("helpBtn").addEventListener("click", () => { helpModal.hidden = false; });
   document.getElementById("helpClose").addEventListener("click", () => { helpModal.hidden = true; });
-  document.getElementById("welcomeHelp").addEventListener("click", () => { helpModal.hidden = false; });
+  document.getElementById("welcomeHelp").addEventListener("click", () => startTour());
+  document.getElementById("startTour").addEventListener("click", () => {
+    helpModal.hidden = true;
+    startTour();
+  });
   helpModal.addEventListener("click", (e) => {
     if (e.target === helpModal) helpModal.hidden = true;
+  });
+
+  /* ---------- Interaktive Tour: jeder Knopf wird markiert und erklärt ---------- */
+
+  const TOUR_STEPS = [
+    { sel: "#meBtn", title: "Wer bist du?", text: "Tippe hier und wähle deinen Namen. Dann weiß die App, wessen Erinnerungen und Aufgaben sie dir zeigen soll — die Wahl gilt nur für dieses Gerät." },
+    { sel: ".nav-controls", title: "Wochen blättern", text: "Mit den Pfeilen springst du eine Woche vor oder zurück. In der Mitte siehst du immer, welche Woche gerade angezeigt wird." },
+    { sel: "#todayBtn", title: "Zurück zu heute", text: "Egal wo du gelandet bist — ein Tipp bringt dich zur aktuellen Woche und zum heutigen Tag zurück." },
+    { sel: "#copyPrevBtn", title: "Vorwoche übernehmen", text: "Holt alle offenen (nicht abgehakten) Aufgaben der letzten Woche in diese Woche — praktisch für den Wochenstart." },
+    { sel: "#famBtn", title: "Familie & Sync", text: "Hier legt ihr eure Mitglieder an, verwaltet Routinen, sichert eure Daten — und verbindet eure Handys über den Einladungslink." },
+    { sel: "#privacyBtn", title: "Privates verstecken", text: "Blendet alle als privat markierten Aufgaben mit einem Tipp aus — gut, wenn die ganze Familie gerade mitschaut." },
+    { sel: "#helpBtn", title: "Anleitung", text: "Öffnet das Nachschlagewerk mit allen Funktionen — und von dort kannst du diese Tour jederzeit neu starten." },
+    { sel: "#themeBtn", title: "Hell & Dunkel", text: "Wechselt zwischen hellem und dunklem Design — mit einer kleinen Show beim Umschalten." },
+    { sel: ".statsbar", title: "Wochen-Fortschritt", text: "Zeigt, wie viel ihr diese Woche schon geschafft habt. Bei 100 % gibt es Konfetti!" },
+    { sel: ".day-strip", title: "Tage wechseln", text: "Tippe auf einen Tag oder wische auf dem Board nach links und rechts. Der orange Punkt zeigt: Hier wartet eine Erinnerung auf dich.", onlyIf: () => mobileQuery.matches },
+    { sel: ".add-ghost", title: "Aufgabe hinzufügen", text: "Tippe hier, um eine neue Aufgabe für diesen Tag anzulegen. Beim Tippen bekommst du Vorschläge aus euren bisherigen Aufgaben." },
+    { sel: ".assign-chips", title: "Wer übernimmt's?", text: "Tippe auf einen Avatar, um die Aufgabe direkt jemandem zu geben. Ohne Auswahl bleibt sie offen — wer zuerst tippt, übernimmt.", prep: "composer", onlyIf: () => members.length > 0 },
+    { sel: ".bell-btn", title: "Erinnerung senden", text: "Macht aus der Aufgabe eine persönliche Erinnerung: Nur der gewählte Empfänger (und du) bekommt sie zu sehen.", prep: "composer" },
+    { sel: ".repeat-btn", title: "Wochen-Routine", text: "Lässt die Aufgabe automatisch jede Woche am selben Tag wieder erscheinen — perfekt für Mülltonnen & Co.", prep: "composer" },
+    { sel: ".lock-btn", title: "Privat markieren", text: "Kennzeichnet die Aufgabe als privat. Mit dem Auge-Knopf oben lässt sich alles Private ausblenden.", prep: "composer" },
+    { sel: ".prio-btn", title: "Priorität", text: "Tippe den Punkt: grün (niedrig) → gelb (mittel) → rot (hoch). Wichtiges rückt in der Liste automatisch nach oben.", prep: "composer" },
+    { sel: "#forYou", title: "Für dich", text: "Deine Woche auf einen Blick: alle Erinnerungen an dich und deine Aufgaben. Antippen springt direkt zum richtigen Tag.", onlyIf: () => !document.getElementById("forYou").hidden },
+  ];
+
+  let tourIdx = -1;
+  let tourEls = null;
+  let tourComposerCol = null;
+
+  function tourTargets(step) {
+    return [...document.querySelectorAll(step.sel)].find((el) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    });
+  }
+
+  function startTour() {
+    endTour();
+    document.getElementById("welcome").hidden = true;
+    const catcher = document.createElement("div");
+    catcher.className = "tour-catcher";
+    const ring = document.createElement("div");
+    ring.className = "tour-ring";
+    const tip = document.createElement("div");
+    tip.className = "tour-tip";
+    document.body.append(catcher, ring, tip);
+    tourEls = { catcher, ring, tip };
+    catcher.addEventListener("click", () => showTourStep(tourIdx + 1));
+    tourIdx = -1;
+    showTourStep(0);
+  }
+
+  function endTour() {
+    if (tourEls) {
+      Object.values(tourEls).forEach((el) => el.remove());
+      tourEls = null;
+    }
+    if (tourComposerCol) {
+      tourComposerCol.classList.remove("composing");
+      tourComposerCol = null;
+    }
+    tourIdx = -1;
+    updateWelcome();
+  }
+
+  function showTourStep(i) {
+    if (!tourEls) return;
+    // nächsten gültigen Schritt suchen
+    let step = null;
+    let target = null;
+    while (i < TOUR_STEPS.length) {
+      const s = TOUR_STEPS[i];
+      if (!s.onlyIf || s.onlyIf()) {
+        if (s.prep === "composer") {
+          const col = document.querySelector(".day-col");
+          if (col && !col.classList.contains("composing")) {
+            col.classList.add("composing");
+            tourComposerCol = col;
+          }
+        } else if (tourComposerCol) {
+          tourComposerCol.classList.remove("composing");
+          tourComposerCol = null;
+        }
+        const t = tourTargets(s);
+        if (t) { step = s; target = t; break; }
+      }
+      i++;
+    }
+    if (!step) {
+      endTour();
+      showToast("Das war die Tour — viel Spaß beim Planen ✨");
+      return;
+    }
+    tourIdx = i;
+
+    target.scrollIntoView({ block: "center", behavior: "instant" });
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const r = target.getBoundingClientRect();
+      const pad = 6;
+      const { ring, tip } = tourEls;
+      ring.style.top = `${r.top - pad}px`;
+      ring.style.left = `${r.left - pad}px`;
+      ring.style.width = `${r.width + pad * 2}px`;
+      ring.style.height = `${r.height + pad * 2}px`;
+      const br = parseFloat(getComputedStyle(target).borderRadius) || 12;
+      ring.style.borderRadius = `${Math.min(br + pad, (r.height + pad * 2) / 2)}px`;
+
+      const remaining = TOUR_STEPS.slice(tourIdx).filter((s) => !s.onlyIf || s.onlyIf()).length;
+      const total = TOUR_STEPS.filter((s) => !s.onlyIf || s.onlyIf()).length;
+      tip.innerHTML = "";
+      const eyebrow = document.createElement("span");
+      eyebrow.className = "eyebrow";
+      eyebrow.textContent = `Schritt ${total - remaining + 1} von ${total}`;
+      const h = document.createElement("h3");
+      h.textContent = step.title;
+      const p = document.createElement("p");
+      p.textContent = step.text;
+      const foot = document.createElement("div");
+      foot.className = "tour-foot";
+      const quit = document.createElement("button");
+      quit.className = "tour-quit";
+      quit.textContent = "Tour beenden";
+      quit.addEventListener("click", (e) => { e.stopPropagation(); endTour(); });
+      const next = document.createElement("button");
+      next.className = "tour-next";
+      next.textContent = remaining > 1 ? "Weiter" : "Fertig";
+      next.addEventListener("click", (e) => { e.stopPropagation(); showTourStep(tourIdx + 1); });
+      foot.append(quit, next);
+      tip.append(eyebrow, h, p, foot);
+
+      // Tooltip unter- oder oberhalb platzieren, im Fenster halten
+      const tipH = 150;
+      const below = r.bottom + tipH + 20 < window.innerHeight;
+      tip.style.top = below ? `${r.bottom + pad + 12}px` : "";
+      tip.style.bottom = below ? "" : `${window.innerHeight - r.top + pad + 12}px`;
+      const left = Math.max(16, Math.min(r.left, window.innerWidth - tip.offsetWidth - 16));
+      tip.style.left = `${left}px`;
+      tip.classList.remove("tip-anim");
+      void tip.offsetWidth;
+      tip.classList.add("tip-anim");
+    }));
+  }
+
+  window.addEventListener("resize", () => {
+    if (tourEls && tourIdx >= 0) showTourStep(tourIdx);
   });
 
   document.getElementById("memberForm").addEventListener("submit", (e) => {
