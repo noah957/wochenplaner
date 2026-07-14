@@ -6,6 +6,9 @@
   const ME_KEY = "wochenplaner.me.v1";
   const ROUTINES_KEY = "wochenplaner.routines.v1";
   const SKIPS_KEY = "wochenplaner.routineSkips.v1";
+  const GROUP_KEY = "wochenplaner.group.v1";
+  const TOMBS_KEY = "wochenplaner.tombstones.v1";
+  const KV_BASE = "https://kvdb.io";
   const DAY_NAMES = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"];
   const DATE_FMT = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit" });
   const RANGE_FMT = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "long", year: "numeric" });
@@ -35,6 +38,8 @@
   let members = loadJSON(MEMBERS_KEY, []);
   let routines = loadJSON(ROUTINES_KEY, []);
   let routineSkips = new Set(loadJSON(SKIPS_KEY, []));
+  let group = loadJSON(GROUP_KEY, null); // {bucket, key} für den Handy-Sync
+  let tombs = loadJSON(TOMBS_KEY, { tasks: {}, members: {}, routines: {} });
   let currentWeekStart = startOfWeek(new Date());
   let dragInfo = null;
   let filterMember = null; // null = alle, "open" = nicht zugewiesen, sonst member.id
@@ -83,7 +88,8 @@
       if ((data[dayKey] || []).some((t) => t.routineId === r.id)) return;
       if (!data[dayKey]) data[dayKey] = [];
       data[dayKey].push({
-        id: crypto.randomUUID(),
+        // deterministische ID: beide Handys erzeugen dieselbe Instanz -> kein Duplikat beim Sync
+        id: `r-${r.id}-${weekKey}`,
         routineId: r.id,
         text: r.text,
         time: r.time || "",
@@ -93,10 +99,14 @@
         kind: r.kind || "task",
         from: r.from || null,
         done: false,
+        u: Date.now(),
       });
       changed = true;
     });
-    if (changed) saveData();
+    if (changed) {
+      saveData();
+      markDirty(weekKey);
+    }
   }
 
   function memberById(id) {
@@ -439,6 +449,8 @@
           return;
         }
         cycleAssignee(task);
+        touch(task);
+        markDirty(weekKeyOfDay(dayKey));
         paintAssignBtn(assignBtn, task);
         saveData();
         updateWeekStats(weekDates(currentWeekStart));
@@ -448,6 +460,8 @@
 
       check.addEventListener("change", () => {
         task.done = check.checked;
+        touch(task);
+        markDirty(weekKeyOfDay(dayKey));
         saveData();
         li.classList.toggle("is-done", task.done);
         if (task.done) {
@@ -471,6 +485,10 @@
         data[dayKey] = (data[dayKey] || []).filter((t) => t.id !== task.id);
         const skipKey = task.routineId ? `${task.routineId}:${toKey(currentWeekStart)}` : null;
         if (skipKey) routineSkips.add(skipKey);
+        tombs.tasks[task.id] = Date.now();
+        saveTombs();
+        markDirty(weekKeyOfDay(dayKey));
+        markDirty("meta");
         saveData();
         saveRoutines();
         animatedRender();
@@ -479,8 +497,13 @@
           "Rückgängig",
           () => {
             if (!data[dayKey]) data[dayKey] = [];
+            delete tombs.tasks[task.id];
+            touch(task);
             data[dayKey].push(task);
             if (skipKey) routineSkips.delete(skipKey);
+            saveTombs();
+            markDirty(weekKeyOfDay(dayKey));
+            markDirty("meta");
             saveData();
             saveRoutines();
             animatedRender();
@@ -491,7 +514,7 @@
       // inline edit on double-click
       textEl.addEventListener("dblclick", (e) => {
         e.preventDefault();
-        startInlineEdit(textEl, task);
+        startInlineEdit(textEl, task, dayKey);
       });
 
       // drag & drop
@@ -535,7 +558,7 @@
     return name.trim().slice(0, 2).toUpperCase();
   }
 
-  function startInlineEdit(textEl, task) {
+  function startInlineEdit(textEl, task, dayKey) {
     textEl.contentEditable = "true";
     textEl.focus();
     const range = document.createRange();
@@ -547,8 +570,10 @@
     const finish = (commit) => {
       textEl.contentEditable = "false";
       const next = textEl.textContent.trim();
-      if (commit && next) {
+      if (commit && next && next !== task.text) {
         task.text = next;
+        touch(task);
+        markDirty(weekKeyOfDay(dayKey));
         saveData();
       }
       textEl.textContent = task.text;
@@ -585,7 +610,10 @@
       if (!task) return;
       data[dragInfo.fromKey] = fromList.filter((t) => t.id !== task.id);
       if (!data[dayKey]) data[dayKey] = [];
+      touch(task);
       data[dayKey].push(task);
+      markDirty(weekKeyOfDay(dayKey));
+      markDirty(weekKeyOfDay(dragInfo.fromKey));
       saveData();
       animatedRender();
       showToast(`Verschoben nach ${dayNameFor(dayKey)}.`);
@@ -688,7 +716,9 @@
         kind: isReminder ? "reminder" : "task",
         from: isReminder ? me : null,
         done: false,
+        u: Date.now(),
       };
+      markDirty(weekKeyOfDay(dayKey));
       if (isRepeating) {
         const dates = weekDates(currentWeekStart);
         const dayIdx = dates.findIndex((d) => toKey(d) === dayKey);
@@ -703,10 +733,12 @@
           from: newTask.from,
           dayIdx: Math.max(0, dayIdx),
           createdWeek: toKey(currentWeekStart),
+          u: Date.now(),
         };
         routines.push(routine);
         newTask.routineId = routine.id;
         saveRoutines();
+        markDirty("meta");
       }
       data[dayKey].push(newTask);
       saveData();
@@ -735,6 +767,7 @@
   function openFamModal() {
     renderMemberList();
     renderRoutineList();
+    updateSyncUi();
     famModal.hidden = false;
     document.getElementById("memberName").focus();
   }
@@ -765,10 +798,17 @@
       del.addEventListener("click", () => {
         const removed = r;
         routines = routines.filter((x) => x.id !== r.id);
+        tombs.routines[r.id] = Date.now();
+        saveTombs();
+        markDirty("meta");
         saveRoutines();
         renderRoutineList();
         showToast("Routine beendet — bestehende Einträge bleiben.", "Rückgängig", () => {
+          delete tombs.routines[removed.id];
+          touch(removed);
           routines.push(removed);
+          saveTombs();
+          markDirty("meta");
           saveRoutines();
           renderRoutineList();
         });
@@ -818,6 +858,9 @@
           localStorage.removeItem(ME_KEY);
           paintMeBtn();
         }
+        tombs.members[m.id] = Date.now();
+        saveTombs();
+        markDirty("meta");
         saveMembers();
         renderMemberList();
         render();
@@ -852,11 +895,378 @@
     const input = document.getElementById("memberName");
     const name = input.value.trim();
     if (!name) return;
-    members.push({ id: crypto.randomUUID(), name, color: nextColor() });
+    members.push({ id: crypto.randomUUID(), name, color: nextColor(), u: Date.now() });
     saveMembers();
+    markDirty("meta");
     input.value = "";
     renderMemberList();
     render();
+  });
+
+  /* ---------- Handy-Sync (verschlüsselt über kvdb.io) ---------- */
+
+  let cryptoKey = null;
+  let dirty = new Set(); // "meta" oder Wochen-Schlüssel
+  let pushTimer = null;
+  let syncBusy = false;
+  let lastSync = null;
+
+  function touch(entity) {
+    entity.u = Date.now();
+  }
+
+  function saveTombs() {
+    localStorage.setItem(TOMBS_KEY, JSON.stringify(tombs));
+  }
+
+  function weekKeyOfDay(dayKey) {
+    return toKey(startOfWeek(dateFromKey(dayKey)));
+  }
+
+  function dateFromKey(k) {
+    const [y, m, d] = k.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }
+
+  function markDirty(k) {
+    if (!group) return;
+    dirty.add(k);
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(pushNow, 1800);
+  }
+
+  function markAllDirty() {
+    if (!group) return;
+    dirty.add("meta");
+    Object.keys(data).forEach((dayKey) => {
+      if ((data[dayKey] || []).length) dirty.add(weekKeyOfDay(dayKey));
+    });
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(pushNow, 400);
+  }
+
+  /* --- Verschlüsselung: AES-GCM, Schlüssel steckt nur im Einladungslink --- */
+
+  function b64uToBytes(s) {
+    const b = s.replace(/-/g, "+").replace(/_/g, "/");
+    return Uint8Array.from(atob(b), (c) => c.charCodeAt(0));
+  }
+
+  function bytesToB64(bytes) {
+    let bin = "";
+    bytes.forEach((x) => { bin += String.fromCharCode(x); });
+    return btoa(bin);
+  }
+
+  function bytesToB64u(bytes) {
+    return bytesToB64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  async function getCryptoKey() {
+    if (!cryptoKey) {
+      cryptoKey = await crypto.subtle.importKey("raw", b64uToBytes(group.key), "AES-GCM", false, ["encrypt", "decrypt"]);
+    }
+    return cryptoKey;
+  }
+
+  async function encPayload(obj) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(
+      await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await getCryptoKey(), new TextEncoder().encode(JSON.stringify(obj)))
+    );
+    const all = new Uint8Array(iv.length + ct.length);
+    all.set(iv);
+    all.set(ct, 12);
+    return bytesToB64(all);
+  }
+
+  async function decPayload(s) {
+    try {
+      const all = Uint8Array.from(atob(s.trim()), (c) => c.charCodeAt(0));
+      const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: all.slice(0, 12) }, await getCryptoKey(), all.slice(12));
+      return JSON.parse(new TextDecoder().decode(pt));
+    } catch {
+      return null;
+    }
+  }
+
+  /* --- Speicher-Zugriff --- */
+
+  async function kvGet(k) {
+    const r = await fetch(`${KV_BASE}/${group.bucket}/${k}`, { cache: "no-store" });
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error(`kv ${r.status}`);
+    return r.text();
+  }
+
+  let mail403Warned = false;
+
+  async function kvPut(k, body) {
+    const r = await fetch(`${KV_BASE}/${group.bucket}/${k}`, { method: "PUT", body });
+    if (r.status === 403) {
+      if (!mail403Warned) {
+        mail403Warned = true;
+        showToast("Fast geschafft: Bestätige noch die E-Mail vom Speicherdienst (kvdb.io) — danach synct alles automatisch.");
+      }
+      throw new Error("kv 403");
+    }
+    mail403Warned = false;
+    if (!r.ok) throw new Error(`kv ${r.status}`);
+  }
+
+  /* --- Zusammenführen: neuere Änderung gewinnt, Löschung per Grabstein --- */
+
+  function mergeEntities(localArr, remoteArr, tombMap) {
+    const map = new Map();
+    localArr.forEach((e) => map.set(e.id, e));
+    (remoteArr || []).forEach((e) => {
+      const ex = map.get(e.id);
+      if (!ex || (e.u || 0) > (ex.u || 0)) map.set(e.id, e);
+    });
+    const out = [];
+    map.forEach((e) => {
+      const dt = tombMap[e.id];
+      if (dt !== undefined && dt >= (e.u || 0)) return;
+      out.push(e);
+    });
+    return out;
+  }
+
+  function mergeTombMaps(a, b) {
+    const out = { ...a };
+    Object.entries(b || {}).forEach(([id, t]) => {
+      if (!(id in out) || t > out[id]) out[id] = t;
+    });
+    const entries = Object.entries(out);
+    if (entries.length > 300) {
+      entries.sort((x, y) => y[1] - x[1]);
+      return Object.fromEntries(entries.slice(0, 300));
+    }
+    return out;
+  }
+
+  function collectWeekTasks(weekKey) {
+    const out = [];
+    weekDates(dateFromKey(weekKey)).forEach((d) => {
+      const dk = toKey(d);
+      (data[dk] || []).forEach((t) => out.push({ ...t, day: dk }));
+    });
+    return out;
+  }
+
+  function applyWeekTasks(weekKey, flat) {
+    weekDates(dateFromKey(weekKey)).forEach((d) => { delete data[toKey(d)]; });
+    flat.forEach((t) => {
+      const day = t.day;
+      const copy = { ...t };
+      delete copy.day;
+      if (!data[day]) data[day] = [];
+      data[day].push(copy);
+    });
+  }
+
+  function weekSignature(flat) {
+    return JSON.stringify(flat.map((t) => [t.id, t.u || 0, t.done, t.text, t.day, t.assignee]).sort());
+  }
+
+  async function mergeRemoteKey(k) {
+    const raw = await kvGet(k);
+    if (raw === null) return false;
+    const remote = await decPayload(raw);
+    if (!remote) return false;
+
+    if (k === "meta") {
+      const before = JSON.stringify([members, routines, [...routineSkips].sort()]);
+      tombs = {
+        tasks: mergeTombMaps(tombs.tasks, remote.tombs && remote.tombs.tasks),
+        members: mergeTombMaps(tombs.members, remote.tombs && remote.tombs.members),
+        routines: mergeTombMaps(tombs.routines, remote.tombs && remote.tombs.routines),
+      };
+      members = mergeEntities(members, remote.members, tombs.members);
+      routines = mergeEntities(routines, remote.routines, tombs.routines);
+      (remote.skips || []).forEach((s) => routineSkips.add(s));
+      saveMembers();
+      saveRoutines();
+      saveTombs();
+      return JSON.stringify([members, routines, [...routineSkips].sort()]) !== before;
+    }
+
+    const weekKey = k.slice(1);
+    const local = collectWeekTasks(weekKey);
+    const merged = mergeEntities(local, remote.tasks, tombs.tasks);
+    if (weekSignature(local) === weekSignature(merged)) return false;
+    applyWeekTasks(weekKey, merged);
+    saveData();
+    return true;
+  }
+
+  async function pullNow() {
+    if (!group || syncBusy) return;
+    syncBusy = true;
+    try {
+      const shownWeek = toKey(currentWeekStart);
+      const todayWeek = toKey(startOfWeek(new Date()));
+      const wants = ["meta", `w${shownWeek}`];
+      if (todayWeek !== shownWeek) wants.push(`w${todayWeek}`);
+      let changed = false;
+      for (const k of wants) {
+        if (await mergeRemoteKey(k)) changed = true;
+      }
+      lastSync = Date.now();
+      if (changed) safeRender();
+      updateSyncUi();
+    } catch {
+      /* offline oder Dienst nicht erreichbar — nächster Versuch kommt */
+    } finally {
+      syncBusy = false;
+      // liegen gebliebene Änderungen nachschieben (z. B. nach E-Mail-Bestätigung)
+      if (dirty.size) {
+        clearTimeout(pushTimer);
+        pushTimer = setTimeout(pushNow, 1500);
+      }
+    }
+  }
+
+  async function pushNow() {
+    if (!group || !dirty.size || syncBusy) {
+      if (dirty.size) { clearTimeout(pushTimer); pushTimer = setTimeout(pushNow, 2000); }
+      return;
+    }
+    syncBusy = true;
+    const items = [...dirty];
+    dirty.clear();
+    try {
+      for (const k of items) {
+        // erst zusammenführen, dann schreiben — so überschreibt niemand die anderen
+        if (k === "meta") {
+          await mergeRemoteKey("meta");
+          await kvPut("meta", await encPayload({ members, routines, skips: [...routineSkips], tombs, u: Date.now() }));
+        } else {
+          await mergeRemoteKey(`w${k}`);
+          await kvPut(`w${k}`, await encPayload({ tasks: collectWeekTasks(k), u: Date.now() }));
+        }
+      }
+      lastSync = Date.now();
+      updateSyncUi();
+    } catch {
+      items.forEach((i) => dirty.add(i));
+    } finally {
+      syncBusy = false;
+    }
+  }
+
+  // Nicht mitten ins Tippen rendern
+  function safeRender() {
+    if (document.activeElement && document.activeElement.closest(".add-form")) return;
+    render();
+  }
+
+  /* --- Gruppen-Verwaltung --- */
+
+  function inviteLink() {
+    return `${location.origin}${location.pathname}#join=${group.bucket}.${group.key}`;
+  }
+
+  function updateSyncUi() {
+    const off = document.getElementById("syncOff");
+    const on = document.getElementById("syncOn");
+    if (!off) return;
+    off.hidden = !!group;
+    on.hidden = !group;
+    if (group) {
+      const t = lastSync ? new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" }).format(lastSync) : "–";
+      document.getElementById("syncStatus").textContent = `Gruppe verbunden · zuletzt abgeglichen ${t} Uhr`;
+      document.getElementById("inviteLink").value = inviteLink();
+      document.getElementById("waShare").href =
+        `https://wa.me/?text=${encodeURIComponent("Komm in unseren Familien-Wochenplaner! Öffne den Link auf deinem Handy: " + inviteLink())}`;
+    }
+  }
+
+  function setGroup(g) {
+    group = g;
+    cryptoKey = null;
+    if (g) localStorage.setItem(GROUP_KEY, JSON.stringify(g));
+    else localStorage.removeItem(GROUP_KEY);
+    updateSyncUi();
+  }
+
+  function parseJoinCode(input) {
+    const m = String(input).match(/#join=([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{20,})/) ||
+      String(input).trim().match(/^([A-Za-z0-9_-]{8,})\.([A-Za-z0-9_-]{20,})$/);
+    return m ? { bucket: m[1], key: m[2] } : null;
+  }
+
+  async function joinGroup(g) {
+    setGroup(g);
+    showToast("Gruppe verbunden — Daten werden abgeglichen…");
+    await pullNow();
+    markAllDirty();
+    render();
+    showToast("Ihr seid jetzt verbunden ✨");
+  }
+
+  document.getElementById("createGroupBtn").addEventListener("click", async () => {
+    const email = document.getElementById("syncEmail").value.trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      showToast("Bitte gib eine gültige E-Mail-Adresse ein.");
+      return;
+    }
+    try {
+      const r = await fetch(KV_BASE, { method: "POST", body: new URLSearchParams({ email }) });
+      const bucket = (await r.text()).trim();
+      if (!r.ok || !/^[A-Za-z0-9_-]{8,}$/.test(bucket)) throw new Error("bucket");
+      const key = bytesToB64u(crypto.getRandomValues(new Uint8Array(32)));
+      await joinGroup({ bucket, key });
+    } catch {
+      showToast("Gruppe konnte nicht erstellt werden — bitte später erneut versuchen.");
+    }
+  });
+
+  document.getElementById("joinBtn").addEventListener("click", () => {
+    const g = parseJoinCode(document.getElementById("joinInput").value);
+    if (!g) {
+      showToast("Das sieht nicht wie ein Einladungslink aus.");
+      return;
+    }
+    joinGroup(g);
+  });
+
+  document.getElementById("copyInvite").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(inviteLink());
+      showToast("Einladungslink kopiert.");
+    } catch {
+      document.getElementById("inviteLink").select();
+      showToast("Bitte manuell kopieren (Strg+C).");
+    }
+  });
+
+  document.getElementById("leaveGroup").addEventListener("click", () => {
+    const old = group;
+    setGroup(null);
+    showToast("Gruppe verlassen — eure Daten bleiben auf diesem Gerät.", "Rückgängig", () => setGroup(old));
+  });
+
+  // Beitritt über einen geteilten Link (#join=…)
+  const joinFromUrl = parseJoinCode(location.hash);
+  if (joinFromUrl) {
+    history.replaceState(null, "", location.pathname + location.search);
+    if (group && group.bucket === joinFromUrl.bucket) {
+      showToast("Du bist schon in dieser Gruppe.");
+    } else {
+      setTimeout(() => {
+        showToast("Einladung zur Familien-Gruppe gefunden!", "Beitreten", () => joinGroup(joinFromUrl));
+      }, 600);
+    }
+  }
+
+  // regelmäßig abgleichen, solange die App sichtbar ist
+  if (group) setTimeout(pullNow, 800);
+  setInterval(() => {
+    if (group && document.visibilityState === "visible") pullNow();
+  }, 60000);
+  document.addEventListener("visibilitychange", () => {
+    if (group && document.visibilityState === "visible") pullNow();
   });
 
   /* ---------- "wer bist du?" (Profil pro Gerät) ---------- */
@@ -984,6 +1394,12 @@
         members = backup.members || [];
         routines = backup.routines || [];
         routineSkips = new Set(backup.routineSkips || []);
+        // Import gewinnt beim Sync: alles frisch stempeln
+        const stamp = Date.now();
+        Object.values(data).forEach((list) => list.forEach((t) => { t.u = stamp; }));
+        members.forEach((m) => { m.u = stamp; });
+        routines.forEach((r) => { r.u = stamp; });
+        markAllDirty();
         saveData();
         saveMembers();
         saveRoutines();
@@ -1407,10 +1823,12 @@
           kind: t.kind || "task",
           from: t.from || null,
           done: false,
+          u: Date.now(),
         });
         copied++;
       });
     });
+    if (copied) markDirty(toKey(currentWeekStart));
     saveData();
     animatedRender();
     showToast(copied ? `${copied} Aufgabe(n) übernommen.` : "Keine offenen Aufgaben in der Vorwoche gefunden.");

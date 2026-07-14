@@ -134,6 +134,36 @@
         <ul id="routineList" class="member-list"></ul>
       </div>
 
+      <div class="sync-section">
+        <h3 class="modal-subhead">
+          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4.5 12.5a3 3 0 0 1-.4-6A4 4 0 0 1 12 5.6a2.8 2.8 0 0 1-.4 6.9H4.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+          Handy-Sync
+        </h3>
+        <div id="syncOff">
+          <p class="modal-hint sync-hint">Verbindet alle Handys eurer Familie: Aufgaben, Mitglieder und Erinnerungen gleichen sich automatisch ab.</p>
+          <div class="sync-row">
+            <input id="syncEmail" type="email" placeholder="Deine E-Mail (Kontakt für den Speicher)" autocomplete="email">
+            <button id="createGroupBtn" type="button" class="pill-btn cta"><span>Gruppe erstellen</span></button>
+          </div>
+          <div class="sync-row">
+            <input id="joinInput" type="text" placeholder="Oder: Einladungslink hier einfügen…" autocomplete="off">
+            <button id="joinBtn" type="button" class="pill-btn">Beitreten</button>
+          </div>
+        </div>
+        <div id="syncOn" hidden>
+          <p id="syncStatus" class="sync-status"></p>
+          <div class="sync-row">
+            <input id="inviteLink" type="text" readonly>
+            <button id="copyInvite" type="button" class="pill-btn">Kopieren</button>
+          </div>
+          <div class="sync-row">
+            <a id="waShare" class="pill-btn" target="_blank" rel="noopener">Per WhatsApp einladen</a>
+            <button id="leaveGroup" type="button" class="pill-btn">Verlassen</button>
+          </div>
+        </div>
+        <p class="modal-hint">Eure Daten werden auf dem Gerät verschlüsselt, bevor sie den Speicherdienst (kvdb.io) erreichen — lesbar nur mit dem Einladungslink. Teilt den Link deshalb nur mit der Familie. Nach dem Erstellen einmalig die Bestätigungs-E-Mail von kvdb.io anklicken (auf kvdb.io/login anforderbar), dann läuft der Abgleich automatisch.</p>
+      </div>
+
       <div class="backup-row">
         <button id="exportBtn" class="pill-btn" title="Alle Daten als Datei herunterladen">Daten sichern</button>
         <button id="importBtn" class="pill-btn" title="Daten aus einer Sicherungsdatei laden">Daten laden</button>

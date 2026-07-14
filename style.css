@@ -805,6 +805,59 @@ body {
   color: var(--prio-low);
 }
 
+.sync-section {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.sync-hint { margin: 0 0 10px; }
+
+.sync-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.sync-row input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 11px;
+  font-family: inherit;
+  font-size: 12px;
+  background: var(--well);
+  color: var(--ink);
+}
+
+.sync-row input:focus {
+  outline: none;
+  border-color: var(--today-ring);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.sync-row .pill-btn { flex-shrink: 0; font-size: 12px; }
+
+.sync-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--prio-low);
+}
+
+.sync-status::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--prio-low);
+  box-shadow: 0 0 0 3px rgba(125, 156, 110, 0.2);
+}
+
 .backup-row {
   display: flex;
   gap: 8px;
