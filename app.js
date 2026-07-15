@@ -1145,7 +1145,6 @@
   let cryptoKey = null;
   let dirty = new Set(); // "meta" oder Wochen-Schlüssel
   let pushTimer = null;
-  let syncBusy = false;
   let lastSync = null;
 
   function touch(entity) {
@@ -1169,7 +1168,7 @@
     if (!group) return;
     dirty.add(k);
     clearTimeout(pushTimer);
-    pushTimer = setTimeout(pushNow, 1800);
+    pushTimer = setTimeout(pushNow, 900);
   }
 
   function markAllDirty() {
@@ -1334,9 +1333,19 @@
     return true;
   }
 
-  async function pullNow() {
-    if (!group || syncBusy) return;
-    syncBusy = true;
+  // Lesen und Schreiben laufen nacheinander in einer Warteschlange —
+  // so blockiert ein Abgleich nie einen wartenden Upload.
+  let syncChain = Promise.resolve();
+  function queueSync(fn) {
+    syncChain = syncChain.then(fn, fn);
+    return syncChain;
+  }
+
+  function pullNow() { return queueSync(doPull); }
+  function pushNow() { return queueSync(doPush); }
+
+  async function doPull() {
+    if (!group) return;
     try {
       const shownWeek = toKey(currentWeekStart);
       const todayWeek = toKey(startOfWeek(new Date()));
@@ -1351,22 +1360,12 @@
       updateSyncUi();
     } catch {
       /* offline oder Dienst nicht erreichbar — nächster Versuch kommt */
-    } finally {
-      syncBusy = false;
-      // liegen gebliebene Änderungen nachschieben (z. B. nach E-Mail-Bestätigung)
-      if (dirty.size) {
-        clearTimeout(pushTimer);
-        pushTimer = setTimeout(pushNow, 1500);
-      }
     }
+    if (dirty.size) pushNow();
   }
 
-  async function pushNow() {
-    if (!group || !dirty.size || syncBusy) {
-      if (dirty.size) { clearTimeout(pushTimer); pushTimer = setTimeout(pushNow, 2000); }
-      return;
-    }
-    syncBusy = true;
+  async function doPush() {
+    if (!group || !dirty.size) return;
     const items = [...dirty];
     dirty.clear();
     try {
@@ -1381,11 +1380,12 @@
         }
       }
       lastSync = Date.now();
+      safeRender();
       updateSyncUi();
     } catch {
       items.forEach((i) => dirty.add(i)); // beim nächsten Versuch erneut senden
-    } finally {
-      syncBusy = false;
+      clearTimeout(pushTimer);
+      pushTimer = setTimeout(pushNow, 4000);
     }
   }
 
@@ -1514,8 +1514,8 @@
     pullNow();
     if (dirty.size) pushNow();
   }
-  if (group) setTimeout(syncTick, 800);
-  setInterval(syncTick, 30000);
+  if (group) setTimeout(syncTick, 500);
+  setInterval(syncTick, 15000);
   document.addEventListener("visibilitychange", syncTick);
 
   /* ---------- "wer bist du?" (Profil pro Gerät) ---------- */
