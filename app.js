@@ -1389,11 +1389,28 @@
     }
   }
 
-  // Nicht mitten ins Tippen rendern
+  // Nicht mitten ins Tippen neu zeichnen — aber sobald das Feld verlassen wird nachholen
+  let renderPending = false;
+
+  function typingInComposer() {
+    const el = document.activeElement;
+    return !!(el && el.closest && el.closest(".add-form"));
+  }
+
   function safeRender() {
-    if (document.activeElement && document.activeElement.closest(".add-form")) return;
+    if (typingInComposer()) { renderPending = true; return; }
+    renderPending = false;
     render();
   }
+
+  document.addEventListener("focusout", () => {
+    if (!renderPending) return;
+    setTimeout(() => {
+      if (!renderPending || typingInComposer()) return;
+      renderPending = false;
+      render();
+    }, 120);
+  });
 
   /* --- Gruppen-Verwaltung --- */
 
