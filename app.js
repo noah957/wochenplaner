@@ -196,22 +196,69 @@
     return (data[dayKey] || []).filter(canSee);
   }
 
+  // Nur neu aufbauen, wenn sich die Struktur wirklich ändert (Woche, Tag, Ansicht)
+  let builtSig = null;
+
+  function boardSig() {
+    return `${toKey(currentWeekStart)}|${mobileQuery.matches ? `d${selectedDayIdx}` : "week"}`;
+  }
+
   function render() {
     materializeRoutines(currentWeekStart);
-    board.innerHTML = "";
     const dates = weekDates(currentWeekStart);
     const todayKey = toKey(new Date());
     const mobile = mobileQuery.matches;
+    const sig = boardSig();
 
     board.classList.toggle("single-day", mobile);
     dayStrip.hidden = !mobile;
     if (mobile) renderDayStrip(dates, todayKey);
 
+    if (sig === builtSig && board.children.length) {
+      refreshBoard(dates); // Spalten bleiben stehen, nur Inhalte anpassen
+    } else {
+      buildBoard(dates, todayKey, mobile);
+      builtSig = sig;
+    }
+
+    weekRangeEl.textContent = `${RANGE_FMT.format(dates[0])} – ${RANGE_FMT.format(dates[6])}`;
+    weekNumberEl.textContent = `KW ${isoWeekNumber(dates[0])}`;
+    animateWeekLabel(toKey(dates[0]));
+    updateWeekStats(dates);
+    updateScrollFade();
+    updateWelcome();
+    updateSuggestions();
+  }
+
+  // Inhalte auffrischen, ohne Spalten, Eingabefelder oder Scrollposition anzutasten
+  function refreshBoard(dates) {
+    [...board.children].forEach((col) => {
+      const key = col.dataset.day;
+      if (!key) return;
+      renderTasks(col.querySelector(".task-list"), key, sortTasks(data[key] || []).filter(taskVisible));
+      updateProgress(col.querySelector(".day-progress"), visibleTasks(key));
+    });
+  }
+
+  // Einen einzelnen Tag auffrischen (z. B. nach Löschen oder Abhaken)
+  function refreshDay(dayKey) {
+    const col = [...board.children].find((c) => c.dataset.day === dayKey);
+    if (col) {
+      renderTasks(col.querySelector(".task-list"), dayKey, sortTasks(data[dayKey] || []).filter(taskVisible));
+      updateProgress(col.querySelector(".day-progress"), visibleTasks(dayKey));
+    }
+    updateWeekStats(weekDates(currentWeekStart));
+    if (mobileQuery.matches) renderDayStrip(weekDates(currentWeekStart), toKey(new Date()));
+  }
+
+  function buildBoard(dates, todayKey, mobile) {
+    board.innerHTML = "";
     dates.forEach((date, i) => {
       if (mobile && i !== selectedDayIdx) return;
       const key = toKey(date);
       const frag = dayTemplate.content.cloneNode(true);
       const col = frag.querySelector(".day-col");
+      col.dataset.day = key;
       col.style.setProperty("--i", i);
       if (vtOk()) col.style.viewTransitionName = `day-${key}`;
       if (key === todayKey) col.classList.add("is-today");
@@ -241,14 +288,6 @@
 
       board.appendChild(frag);
     });
-
-    weekRangeEl.textContent = `${RANGE_FMT.format(dates[0])} – ${RANGE_FMT.format(dates[6])}`;
-    weekNumberEl.textContent = `KW ${isoWeekNumber(dates[0])}`;
-    animateWeekLabel(toKey(dates[0]));
-    updateWeekStats(dates);
-    updateScrollFade();
-    updateWelcome();
-    updateSuggestions();
   }
 
   /* Eingabe-Vorschläge: lernen aus euren bisherigen Aufgaben */
@@ -402,8 +441,8 @@
   // smoothly (FLIP) instead of snapping. Falls back to a plain render.
   function animatedRender(after) {
     const doRender = () => {
-      render();
       if (after) after();
+      else render();
     };
     if (!vtOk()) {
       doRender();
@@ -420,184 +459,263 @@
     { cls: "gl-private", label: "Privat", icon: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5.5 7V5.5a2.5 2.5 0 0 1 5 0V7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>' },
   ];
 
-  function renderTasks(list, dayKey, tasks) {
-    list.innerHTML = "";
+  // Kennung aller sichtbaren Eigenschaften — ändert sie sich, wird die Karte aufgefrischt
+  function taskSig(t) {
+    return [
+      t.done ? 1 : 0, t.text, t.time || "", t.prio || "none", t.assignee || "",
+      t.private ? 1 : 0, t.kind || "task", t.from || "", t.note || "", t.routineId ? 1 : 0,
+    ].join("");
+  }
 
+  function getTask(dayKey, id) {
+    return (data[dayKey] || []).find((t) => t.id === id);
+  }
+
+  // Bestehende Karten behalten und nur anpassen — kein Neuaufbau, kein Flackern
+  function renderTasks(list, dayKey, tasks) {
     if (!tasks.length) {
-      const hint = document.createElement("div");
-      hint.className = "empty-hint";
-      const img = document.createElement("img");
-      img.className = "empty-img";
-      img.src = "assets/empty.png";
-      img.alt = "";
-      img.width = 92;
-      img.height = 92;
-      const label = document.createElement("span");
-      label.textContent = EMPTY_HINTS[hashCode(dayKey) % EMPTY_HINTS.length];
-      hint.append(img, label);
-      list.appendChild(hint);
+      if (!list.querySelector(".empty-hint")) {
+        list.innerHTML = "";
+        const hint = document.createElement("div");
+        hint.className = "empty-hint";
+        const img = document.createElement("img");
+        img.className = "empty-img";
+        img.src = "assets/empty.png";
+        img.alt = "";
+        img.width = 92;
+        img.height = 92;
+        const label = document.createElement("span");
+        label.textContent = EMPTY_HINTS[hashCode(dayKey) % EMPTY_HINTS.length];
+        hint.append(img, label);
+        list.appendChild(hint);
+      }
       return;
     }
+    const hint = list.querySelector(".empty-hint");
+    if (hint) hint.remove();
 
-    // in Gruppen sortieren; Labels nur, wenn mehr als eine Gruppe belegt ist
+    // Gewünschte Reihenfolge: nach Gruppen, Labels nur bei gemischten Tagen
     const grouped = tasks.slice().sort((a, b) => groupOf(a) - groupOf(b));
-    const usedGroups = new Set(grouped.map(groupOf));
-    const showLabels = usedGroups.size > 1;
+    const showLabels = new Set(grouped.map(groupOf)).size > 1;
+    const desired = [];
     let lastGroup = -1;
-
-    grouped.forEach((task, idx) => {
+    grouped.forEach((task) => {
       const g = groupOf(task);
       if (showLabels && g !== lastGroup) {
         lastGroup = g;
-        const label = document.createElement("li");
-        label.className = `group-label ${GROUP_META[g].cls}`;
-        label.innerHTML = `${GROUP_META[g].icon}<span>${GROUP_META[g].label}</span>`;
-        list.appendChild(label);
+        desired.push({ type: "label", key: `g${g}`, g });
       }
-      renderTaskItem(list, dayKey, task, idx);
+      desired.push({ type: "task", key: `t${task.id}`, task });
+    });
+
+    const vorhanden = new Map();
+    [...list.children].forEach((el) => { if (el.dataset.key) vorhanden.set(el.dataset.key, el); });
+
+    const behalten = new Set();
+    let prev = null;
+    desired.forEach((d, idx) => {
+      let el = vorhanden.get(d.key);
+      if (d.type === "label") {
+        if (!el) el = buildLabelEl(d.g);
+      } else if (el) {
+        if (el.dataset.sig !== taskSig(d.task)) paintTaskEl(el, d.task); // nur auffrischen
+      } else {
+        el = buildTaskEl(dayKey, d.task, idx);
+      }
+      behalten.add(d.key);
+      const ziel = prev ? prev.nextSibling : list.firstChild;
+      if (el !== ziel) list.insertBefore(el, ziel); // verschiebt, ohne neu zu erzeugen
+      prev = el;
+    });
+
+    [...list.children].forEach((el) => {
+      if (!el.dataset.key || !behalten.has(el.dataset.key)) el.remove();
     });
   }
 
-  function renderTaskItem(list, dayKey, task, idx) {
-    {
-      const frag = taskTemplate.content.cloneNode(true);
-      const li = frag.querySelector(".task");
-      const check = frag.querySelector(".task-check");
-      const timeEl = frag.querySelector(".task-time");
-      const textEl = frag.querySelector(".task-text");
-      const prioEl = frag.querySelector(".task-prio");
-      const assignBtn = frag.querySelector(".task-assign");
-      const delBtn = frag.querySelector(".task-del");
+  function buildLabelEl(g) {
+    const label = document.createElement("li");
+    label.className = `group-label ${GROUP_META[g].cls}`;
+    label.dataset.key = `g${g}`;
+    label.innerHTML = `${GROUP_META[g].icon}<span>${GROUP_META[g].label}</span>`;
+    return label;
+  }
 
-      li.style.animationDelay = `${idx * 35}ms`;
-      if (vtOk()) li.style.viewTransitionName = `t-${task.id}`;
-      check.checked = task.done;
-      if (task.done) li.classList.add("is-done");
-      if (task.private) li.classList.add("is-private");
-      if (task.kind === "reminder") {
-        li.classList.add("is-reminder");
-        const sender = memberById(task.from);
-        frag.querySelector(".task-from").textContent = sender ? `von ${sender.name}` : "";
+  // Inhalte einer bestehenden Karte aktualisieren
+  function paintTaskEl(li, task) {
+    const check = li.querySelector(".task-check");
+    if (check.checked !== !!task.done) check.checked = !!task.done;
+    li.classList.toggle("is-done", !!task.done);
+    li.classList.toggle("is-private", !!task.private);
+    li.classList.toggle("is-routine", !!task.routineId);
+    li.classList.toggle("is-reminder", task.kind === "reminder");
+    li.classList.toggle("has-note", !!task.note);
+
+    const sender = memberById(task.from);
+    li.querySelector(".task-from").textContent =
+      task.kind === "reminder" && sender ? `von ${sender.name}` : "";
+
+    const textEl = li.querySelector(".task-text");
+    if (textEl.contentEditable !== "true" && textEl.textContent !== task.text) textEl.textContent = task.text;
+    const noteEl = li.querySelector(".task-note");
+    if (noteEl.contentEditable !== "true" && noteEl.textContent !== (task.note || "")) noteEl.textContent = task.note || "";
+
+    const timeEl = li.querySelector(".task-time");
+    if (timeEl.textContent !== (task.time || "")) timeEl.textContent = task.time || "";
+    li.querySelector(".task-prio").dataset.p = task.prio || "none";
+    paintAssignBtn(li.querySelector(".task-assign"), task);
+    li.dataset.sig = taskSig(task);
+  }
+
+  function buildTaskEl(dayKey, task, idx) {
+    const frag = taskTemplate.content.cloneNode(true);
+    const li = frag.querySelector(".task");
+    const taskId = task.id;
+    const hole = () => getTask(dayKey, taskId);
+
+    li.dataset.key = `t${taskId}`;
+    li.dataset.id = taskId;
+    li.style.animationDelay = `${Math.min(idx, 8) * 35}ms`;
+    if (vtOk()) li.style.viewTransitionName = `t-${taskId}`;
+    paintTaskEl(li, task);
+
+    const check = li.querySelector(".task-check");
+    const textEl = li.querySelector(".task-text");
+    const noteEl = li.querySelector(".task-note");
+    const assignBtn = li.querySelector(".task-assign");
+
+    li.querySelector(".task-note-btn").addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const t = hole();
+      if (!t) return;
+      li.classList.add("has-note");
+      startNoteEdit(noteEl, t, dayKey, li);
+    });
+
+    noteEl.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const t = hole();
+      if (t) startNoteEdit(noteEl, t, dayKey, li);
+    });
+
+    assignBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const t = hole();
+      if (!t) return;
+      if (t.kind === "reminder") {
+        const rec = memberById(t.assignee);
+        const sender = memberById(t.from);
+        showToast(`Erinnerung${sender ? ` von ${sender.name}` : ""}${rec ? ` an ${rec.name}` : ""} — nur ihr beide seht sie.`);
+        return;
       }
-      if (task.routineId) li.classList.add("is-routine");
-      const noteEl = frag.querySelector(".task-note");
-      if (task.note) {
-        li.classList.add("has-note");
-        noteEl.textContent = task.note;
+      if (!members.length) {
+        openFamModal();
+        showToast("Lege zuerst eure Familienmitglieder an.");
+        return;
       }
-      frag.querySelector(".task-note-btn").addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        li.classList.add("has-note");
-        startNoteEdit(noteEl, task, dayKey, li);
-      });
-      noteEl.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        startNoteEdit(noteEl, task, dayKey, li);
-      });
-      timeEl.textContent = task.time || "";
-      textEl.textContent = task.text;
-      prioEl.dataset.p = task.prio || "none";
-      paintAssignBtn(assignBtn, task);
+      cycleAssignee(t);
+      touch(t);
+      markDirty(weekKeyOfDay(dayKey));
+      saveData();
+      paintTaskEl(li, t);
+      updateWeekStats(weekDates(currentWeekStart));
+      const m = memberById(t.assignee);
+      if (m) showToast(`${m.name} übernimmt: ${t.text}`);
+    });
 
-      assignBtn.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (task.kind === "reminder") {
-          const rec = memberById(task.assignee);
-          const sender = memberById(task.from);
-          showToast(`Erinnerung${sender ? ` von ${sender.name}` : ""}${rec ? ` an ${rec.name}` : ""} — nur ihr beide seht sie.`);
-          return;
+    check.addEventListener("change", () => {
+      const t = hole();
+      if (!t) return;
+      t.done = check.checked;
+      touch(t);
+      markDirty(weekKeyOfDay(dayKey));
+      saveData();
+      li.classList.toggle("is-done", t.done);
+      li.dataset.sig = taskSig(t);
+      if (t.done) {
+        li.classList.add("just-done");
+        li.addEventListener("animationend", () => li.classList.remove("just-done"), { once: true });
+        if (navigator.vibrate && !reducedMotion) navigator.vibrate(12);
+      }
+      const col = li.closest(".day-col");
+      const chip = col.querySelector(".day-progress");
+      updateProgress(chip, visibleTasks(dayKey));
+      updateWeekStats(weekDates(currentWeekStart), true);
+      if (mobileQuery.matches) renderDayStrip(weekDates(currentWeekStart), toKey(new Date()));
+      checkDue();
+      if (t.done && visibleTasks(dayKey).every((x) => x.done)) {
+        confettiBurst(chip);
+        if (navigator.vibrate && !reducedMotion) navigator.vibrate([16, 60, 24]);
+        showToast(`${dayNameFor(dayKey)} komplett erledigt ✨`);
+      }
+      // Erledigtes sinkt nach unten — sanft nachsortieren, statt alles neu zu bauen
+      clearTimeout(li._sortTimer);
+      li._sortTimer = setTimeout(() => refreshDay(dayKey), 450);
+    });
+
+    li.querySelector(".task-del").addEventListener("click", () => {
+      const t = hole();
+      if (!t) return;
+      data[dayKey] = (data[dayKey] || []).filter((x) => x.id !== taskId);
+      const skipKey = t.routineId ? `${t.routineId}:${toKey(currentWeekStart)}` : null;
+      if (skipKey) routineSkips.add(skipKey);
+      tombs.tasks[taskId] = Date.now();
+      saveTombs();
+      markDirty(weekKeyOfDay(dayKey));
+      markDirty("meta");
+      saveData();
+      saveRoutines();
+      removeTaskEl(li, dayKey);
+      showToast(
+        t.routineId ? "Routine diese Woche übersprungen." : "Aufgabe gelöscht.",
+        "Rückgängig",
+        () => {
+          if (!data[dayKey]) data[dayKey] = [];
+          delete tombs.tasks[taskId];
+          touch(t);
+          data[dayKey].push(t);
+          if (skipKey) routineSkips.delete(skipKey);
+          saveTombs();
+          markDirty(weekKeyOfDay(dayKey));
+          markDirty("meta");
+          saveData();
+          saveRoutines();
+          refreshDay(dayKey);
         }
-        if (!members.length) {
-          openFamModal();
-          showToast("Lege zuerst eure Familienmitglieder an.");
-          return;
-        }
-        cycleAssignee(task);
-        touch(task);
-        markDirty(weekKeyOfDay(dayKey));
-        paintAssignBtn(assignBtn, task);
-        saveData();
-        updateWeekStats(weekDates(currentWeekStart));
-        const m = memberById(task.assignee);
-        if (m) showToast(`${m.name} übernimmt: ${task.text}`);
-      });
+      );
+    });
 
-      check.addEventListener("change", () => {
-        task.done = check.checked;
-        touch(task);
-        markDirty(weekKeyOfDay(dayKey));
-        saveData();
-        li.classList.toggle("is-done", task.done);
-        if (task.done) {
-          li.classList.add("just-done");
-          li.addEventListener("animationend", () => li.classList.remove("just-done"), { once: true });
-          if (navigator.vibrate && !reducedMotion) navigator.vibrate(12);
-        }
-        const col = li.closest(".day-col");
-        const chip = col.querySelector(".day-progress");
-        updateProgress(chip, visibleTasks(dayKey));
-        updateWeekStats(weekDates(currentWeekStart), true);
-        if (mobileQuery.matches) renderDayStrip(weekDates(currentWeekStart), toKey(new Date()));
-        if (task.done && visibleTasks(dayKey).every((t) => t.done)) {
-          confettiBurst(chip);
-          if (navigator.vibrate && !reducedMotion) navigator.vibrate([16, 60, 24]);
-          showToast(`${dayNameFor(dayKey)} komplett erledigt ✨`);
-        }
-      });
+    textEl.addEventListener("dblclick", (e) => {
+      e.preventDefault();
+      const t = hole();
+      if (t) startInlineEdit(textEl, t, dayKey);
+    });
 
-      delBtn.addEventListener("click", () => {
-        data[dayKey] = (data[dayKey] || []).filter((t) => t.id !== task.id);
-        const skipKey = task.routineId ? `${task.routineId}:${toKey(currentWeekStart)}` : null;
-        if (skipKey) routineSkips.add(skipKey);
-        tombs.tasks[task.id] = Date.now();
-        saveTombs();
-        markDirty(weekKeyOfDay(dayKey));
-        markDirty("meta");
-        saveData();
-        saveRoutines();
-        animatedRender();
-        showToast(
-          task.routineId ? "Routine diese Woche übersprungen." : "Aufgabe gelöscht.",
-          "Rückgängig",
-          () => {
-            if (!data[dayKey]) data[dayKey] = [];
-            delete tombs.tasks[task.id];
-            touch(task);
-            data[dayKey].push(task);
-            if (skipKey) routineSkips.delete(skipKey);
-            saveTombs();
-            markDirty(weekKeyOfDay(dayKey));
-            markDirty("meta");
-            saveData();
-            saveRoutines();
-            animatedRender();
-          }
-        );
-      });
+    li.addEventListener("dragstart", (e) => {
+      dragInfo = { taskId, fromKey: dayKey };
+      li.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", taskId);
+    });
+    li.addEventListener("dragend", () => {
+      li.classList.remove("dragging");
+      dragInfo = null;
+    });
 
-      // inline edit on double-click
-      textEl.addEventListener("dblclick", (e) => {
-        e.preventDefault();
-        startInlineEdit(textEl, task, dayKey);
-      });
+    return li;
+  }
 
-      // drag & drop
-      li.addEventListener("dragstart", (e) => {
-        dragInfo = { taskId: task.id, fromKey: dayKey };
-        li.classList.add("dragging");
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", task.id);
-      });
-      li.addEventListener("dragend", () => {
-        li.classList.remove("dragging");
-        dragInfo = null;
-      });
-
-      list.appendChild(frag);
-    }
+  // Karte weich ausblenden, dann Tag auffrischen
+  function removeTaskEl(li, dayKey) {
+    if (reducedMotion) { li.remove(); refreshDay(dayKey); return; }
+    li.style.pointerEvents = "none";
+    li.animate(
+      [{ opacity: 1, transform: "translateX(0) scale(1)" }, { opacity: 0, transform: "translateX(-14px) scale(0.94)" }],
+      { duration: 260, easing: "cubic-bezier(0.32, 0.72, 0, 1)" }
+    ).onfinish = () => { li.remove(); refreshDay(dayKey); };
   }
 
   function paintAssignBtn(btn, task) {
@@ -716,12 +834,13 @@
       if (!task) return;
       data[dragInfo.fromKey] = fromList.filter((t) => t.id !== task.id);
       if (!data[dayKey]) data[dayKey] = [];
+      const vonTag = dragInfo.fromKey;
       touch(task);
       data[dayKey].push(task);
       markDirty(weekKeyOfDay(dayKey));
-      markDirty(weekKeyOfDay(dragInfo.fromKey));
+      markDirty(weekKeyOfDay(vonTag));
       saveData();
-      animatedRender();
+      animatedRender(() => { refreshDay(vonTag); refreshDay(dayKey); });
       showToast(`Verschoben nach ${dayNameFor(dayKey)}.`);
     });
   }
@@ -855,17 +974,20 @@
       } else if (isRepeating) {
         showToast(`Routine angelegt — erscheint jetzt jede Woche.`);
       }
-      animatedRender(() => {
-        // Composer offen halten und für schnelle Eingabe neu fokussieren
-        const cols = board.querySelectorAll(".day-col");
-        const dates = weekDates(currentWeekStart);
-        const idx = dates.findIndex((d) => toKey(d) === dayKey);
-        const col = mobileQuery.matches ? cols[0] : cols[idx];
-        if (col) {
-          col.classList.add("composing");
-          col.querySelector(".add-input")?.focus();
-        }
-      });
+      // Eingabefelder leeren, Editor bleibt offen und fokussiert
+      input.value = "";
+      timeInput.value = "";
+      prioBtn.dataset.p = "none";
+      if (isPrivate) { isPrivate = false; lockBtn.classList.remove("on"); }
+      if (isReminder) { isReminder = false; bellBtn.classList.remove("on"); }
+      if (isRepeating) { isRepeating = false; repeatBtn.classList.remove("on"); }
+      selectedAssignee = null;
+      chipsEl.querySelectorAll(".assign-chip").forEach((c) => c.classList.remove("selected"));
+
+      // Nur diesen Tag auffrischen — die neue Karte gleitet herein
+      refreshDay(dayKey);
+      updateSuggestions();
+      input.focus();
     });
   }
 
