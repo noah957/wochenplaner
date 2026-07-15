@@ -83,34 +83,72 @@
     localStorage.setItem(SHOP_KEY, JSON.stringify(shop));
   }
 
-  // Routinen für die angezeigte Woche anlegen (einmal pro Woche, überspringt Gelöschtes)
+  // Wiederholungs-Arten
+  const FREQ = ["weekly", "daily", "weekdays", "biweekly", "monthly"];
+  const FREQ_TEXT = {
+    weekly: "Jede Woche an diesem Tag",
+    daily: "Jeden Tag",
+    weekdays: "Montags bis freitags",
+    biweekly: "Jede 2. Woche an diesem Tag",
+    monthly: "Einmal im Monat (an diesem Datum)",
+  };
+  const FREQ_KURZ = { weekly: "wöchentlich", daily: "täglich", weekdays: "Mo–Fr", biweekly: "2-wöchentlich", monthly: "monatlich" };
+
+  // An welchen Tagen dieser Woche soll die Routine erscheinen?
+  function routineDays(r, weekStart) {
+    const freq = r.freq || "weekly";
+    const tage = [];
+    const push = (i) => {
+      const d = new Date(weekStart);
+      d.setDate(d.getDate() + i);
+      tage.push(d);
+    };
+    if (freq === "daily") { for (let i = 0; i < 7; i++) push(i); }
+    else if (freq === "weekdays") { for (let i = 0; i < 5; i++) push(i); }
+    else if (freq === "biweekly") {
+      const start = dateFromKey(r.createdWeek || toKey(weekStart));
+      const wochen = Math.round((weekStart - startOfWeek(start)) / (7 * 86400000));
+      if (wochen % 2 === 0) push(r.dayIdx);
+    } else if (freq === "monthly") {
+      const tagImMonat = r.monthDay || dateFromKey(r.createdWeek).getDate();
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(weekStart);
+        d.setDate(d.getDate() + i);
+        if (d.getDate() === tagImMonat) tage.push(d);
+      }
+    } else push(r.dayIdx); // weekly
+    return tage;
+  }
+
+  // Routinen für die angezeigte Woche anlegen (überspringt einzeln Gelöschtes)
   function materializeRoutines(weekStart) {
     if (!routines.length) return;
     const weekKey = toKey(weekStart);
     let changed = false;
     routines.forEach((r) => {
       if (r.createdWeek && weekKey < r.createdWeek) return;
-      if (routineSkips.has(`${r.id}:${weekKey}`)) return;
-      const d = new Date(weekStart);
-      d.setDate(d.getDate() + r.dayIdx);
-      const dayKey = toKey(d);
-      if ((data[dayKey] || []).some((t) => t.routineId === r.id)) return;
-      if (!data[dayKey]) data[dayKey] = [];
-      data[dayKey].push({
-        // deterministische ID: beide Handys erzeugen dieselbe Instanz -> kein Duplikat beim Sync
-        id: `r-${r.id}-${weekKey}`,
-        routineId: r.id,
-        text: r.text,
-        time: r.time || "",
-        prio: r.prio || "none",
-        assignee: r.assignee || null,
-        private: !!r.private,
-        kind: r.kind || "task",
-        from: r.from || null,
-        done: false,
-        u: Date.now(),
+      routineDays(r, weekStart).forEach((d) => {
+        const dayKey = toKey(d);
+        if (routineSkips.has(`${r.id}:${dayKey}`) || routineSkips.has(`${r.id}:${weekKey}`)) return;
+        if ((data[dayKey] || []).some((t) => t.routineId === r.id)) return;
+        if (!data[dayKey]) data[dayKey] = [];
+        data[dayKey].push({
+          // deterministische ID: beide Handys erzeugen dieselbe Instanz -> kein Duplikat beim Sync
+          id: `r-${r.id}-${dayKey}`,
+          routineId: r.id,
+          text: r.text,
+          time: r.time || "",
+          prio: r.prio || "none",
+          assignee: r.assignee || null,
+          private: !!r.private,
+          kind: r.kind || "task",
+          from: r.from || null,
+          note: "",
+          done: false,
+          u: Date.now(),
+        });
+        changed = true;
       });
-      changed = true;
     });
     if (changed) {
       saveData();
@@ -157,9 +195,16 @@
   /* ---------- rendering ---------- */
 
   function sortTasks(tasks) {
+    // Sobald ein Tag von Hand sortiert wurde, gilt diese Reihenfolge
+    const handSortiert = tasks.some((t) => typeof t.ord === "number");
     return tasks.slice().sort((a, b) => {
       // Erledigtes sinkt nach unten, Offenes bleibt im Blick
       if (a.done !== b.done) return a.done ? 1 : -1;
+      if (handSortiert) {
+        const ao = typeof a.ord === "number" ? a.ord : Infinity;
+        const bo = typeof b.ord === "number" ? b.ord : Infinity;
+        if (ao !== bo) return ao - bo;
+      }
       const t = (a.time || "99:99").localeCompare(b.time || "99:99");
       if (t !== 0) return t;
       return (PRIO_WEIGHT[a.prio] ?? 3) - (PRIO_WEIGHT[b.prio] ?? 3);
@@ -200,8 +245,28 @@
   let builtSig = null;
 
   function boardSig() {
-    return `${toKey(currentWeekStart)}|${mobileQuery.matches ? `d${selectedDayIdx}` : "week"}`;
+    // heutiges Datum mitzählen: sonst bleibt der HEUTE-Marker über Mitternacht stehen
+    return `${toKey(currentWeekStart)}|${mobileQuery.matches ? `d${selectedDayIdx}` : "week"}|${toKey(new Date())}`;
   }
+
+  // Punkt Mitternacht neu zeichnen, damit „Heute" mitwandert
+  function scheduleMidnight() {
+    const jetzt = new Date();
+    const mitternacht = new Date(jetzt);
+    mitternacht.setHours(24, 0, 5, 0); // 5 Sek. Puffer
+    setTimeout(() => {
+      const heuteIdx = (new Date().getDay() + 6) % 7;
+      // Wer die aktuelle Woche ansieht, wandert automatisch auf den neuen Tag
+      if (toKey(currentWeekStart) !== toKey(startOfWeek(new Date()))) {
+        currentWeekStart = startOfWeek(new Date());
+      }
+      if (mobileQuery.matches) selectedDayIdx = heuteIdx;
+      render();
+      checkDue();
+      scheduleMidnight();
+    }, mitternacht - jetzt);
+  }
+  scheduleMidnight();
 
   function render() {
     materializeRoutines(currentWeekStart);
@@ -462,6 +527,7 @@
   // Kennung aller sichtbaren Eigenschaften — ändert sie sich, wird die Karte aufgefrischt
   function taskSig(t) {
     return [
+      typeof t.ord === "number" ? t.ord : "",
       t.done ? 1 : 0, t.text, t.time || "", t.prio || "none", t.assignee || "",
       t.private ? 1 : 0, t.kind || "task", t.from || "", t.note || "", t.routineId ? 1 : 0,
     ].join("");
@@ -660,7 +726,8 @@
       const t = hole();
       if (!t) return;
       data[dayKey] = (data[dayKey] || []).filter((x) => x.id !== taskId);
-      const skipKey = t.routineId ? `${t.routineId}:${toKey(currentWeekStart)}` : null;
+      // nur diesen einen Termin überspringen, die Routine läuft weiter
+      const skipKey = t.routineId ? `${t.routineId}:${dayKey}` : null;
       if (skipKey) routineSkips.add(skipKey);
       tombs.tasks[taskId] = Date.now();
       saveTombs();
@@ -670,7 +737,7 @@
       saveRoutines();
       removeTaskEl(li, dayKey);
       showToast(
-        t.routineId ? "Routine diese Woche übersprungen." : "Aufgabe gelöscht.",
+        t.routineId ? "Dieser Routine-Termin wurde übersprungen." : "Aufgabe gelöscht.",
         "Rückgängig",
         () => {
           if (!data[dayKey]) data[dayKey] = [];
@@ -817,18 +884,59 @@
     });
   }
 
+  // Karte unterhalb des Zeigers finden — bestimmt die Einfügestelle
+  function elementNachPosition(list, y) {
+    return [...list.querySelectorAll(".task:not(.dragging)")].reduce(
+      (naechste, el) => {
+        const box = el.getBoundingClientRect();
+        const abstand = y - box.top - box.height / 2;
+        return abstand < 0 && abstand > naechste.abstand ? { abstand, el } : naechste;
+      },
+      { abstand: -Infinity, el: null }
+    ).el;
+  }
+
+  // Reihenfolge aus dem sichtbaren Zustand in die Daten übernehmen
+  function ordnungSpeichern(list, dayKey) {
+    const reihenfolge = [...list.querySelectorAll(".task")].map((el) => el.dataset.id);
+    let geaendert = false;
+    (data[dayKey] || []).forEach((t) => {
+      const idx = reihenfolge.indexOf(t.id);
+      const neu = idx >= 0 ? idx : 999;
+      if (t.ord !== neu) { t.ord = neu; touch(t); geaendert = true; }
+    });
+    if (geaendert) {
+      saveData();
+      markDirty(weekKeyOfDay(dayKey));
+    }
+  }
+
   function setupDropZone(list, dayKey) {
     list.addEventListener("dragover", (e) => {
       if (!dragInfo) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
       list.classList.add("drag-over");
+      // Innerhalb desselben Tages: Karte live an die Zielstelle schieben
+      if (dragInfo.fromKey !== dayKey) return;
+      const gezogen = list.querySelector(".task.dragging");
+      if (!gezogen) return;
+      const danach = elementNachPosition(list, e.clientY);
+      if (danach) { if (danach !== gezogen.nextSibling) list.insertBefore(gezogen, danach); }
+      else if (list.lastElementChild !== gezogen) list.appendChild(gezogen);
     });
     list.addEventListener("dragleave", () => list.classList.remove("drag-over"));
     list.addEventListener("drop", (e) => {
       e.preventDefault();
       list.classList.remove("drag-over");
-      if (!dragInfo || dragInfo.fromKey === dayKey) return;
+      if (!dragInfo) return;
+
+      // Sortieren innerhalb desselben Tages
+      if (dragInfo.fromKey === dayKey) {
+        ordnungSpeichern(list, dayKey);
+        return;
+      }
+
       const fromList = data[dragInfo.fromKey] || [];
       const task = fromList.find((t) => t.id === dragInfo.taskId);
       if (!task) return;
@@ -836,6 +944,9 @@
       if (!data[dayKey]) data[dayKey] = [];
       const vonTag = dragInfo.fromKey;
       touch(task);
+      // ans Ende des Zieltages, falls dieser von Hand sortiert ist
+      const maxOrd = Math.max(-1, ...(data[dayKey] || []).map((t) => (typeof t.ord === "number" ? t.ord : -1)));
+      task.ord = maxOrd >= 0 ? maxOrd + 1 : undefined;
       data[dayKey].push(task);
       markDirty(weekKeyOfDay(dayKey));
       markDirty(weekKeyOfDay(vonTag));
@@ -854,12 +965,15 @@
     let selectedAssignee = null;
     let isPrivate = false;
     let isReminder = false;
-    let isRepeating = false;
+    let freqIdx = -1; // -1 = keine Wiederholung
 
     repeatBtn.addEventListener("click", () => {
-      isRepeating = !isRepeating;
-      repeatBtn.classList.toggle("on", isRepeating);
-      repeatBtn.title = isRepeating ? "Routine aktiv — erscheint jede Woche an diesem Tag" : "Jede Woche wiederholen";
+      freqIdx = freqIdx >= FREQ.length - 1 ? -1 : freqIdx + 1;
+      const an = freqIdx >= 0;
+      repeatBtn.classList.toggle("on", an);
+      repeatBtn.dataset.freq = an ? FREQ_KURZ[FREQ[freqIdx]] : "";
+      repeatBtn.title = an ? `Wiederholung: ${FREQ_TEXT[FREQ[freqIdx]]} — tippen zum Wechseln` : "Wiederholen (tippen zum Wählen)";
+      if (an) showToast(FREQ_TEXT[FREQ[freqIdx]]);
     });
 
     members.forEach((m) => {
@@ -945,6 +1059,7 @@
         u: Date.now(),
       };
       markDirty(weekKeyOfDay(dayKey));
+      const isRepeating = freqIdx >= 0;
       if (isRepeating) {
         const dates = weekDates(currentWeekStart);
         const dayIdx = dates.findIndex((d) => toKey(d) === dayKey);
@@ -958,6 +1073,8 @@
           kind: newTask.kind,
           from: newTask.from,
           dayIdx: Math.max(0, dayIdx),
+          freq: FREQ[freqIdx],
+          monthDay: dateFromKey(dayKey).getDate(),
           createdWeek: toKey(currentWeekStart),
           u: Date.now(),
         };
@@ -972,7 +1089,7 @@
         const rec = memberById(selectedAssignee);
         showToast(`Erinnerung an ${rec ? rec.name : "?"} gespeichert 🔔`);
       } else if (isRepeating) {
-        showToast(`Routine angelegt — erscheint jetzt jede Woche.`);
+        showToast(`Routine angelegt: ${FREQ_TEXT[FREQ[freqIdx]].toLowerCase()}.`);
       }
       // Eingabefelder leeren, Editor bleibt offen und fokussiert
       input.value = "";
@@ -980,7 +1097,7 @@
       prioBtn.dataset.p = "none";
       if (isPrivate) { isPrivate = false; lockBtn.classList.remove("on"); }
       if (isReminder) { isReminder = false; bellBtn.classList.remove("on"); }
-      if (isRepeating) { isRepeating = false; repeatBtn.classList.remove("on"); }
+      if (isRepeating) { freqIdx = -1; repeatBtn.classList.remove("on"); repeatBtn.dataset.freq = ""; }
       selectedAssignee = null;
       chipsEl.querySelectorAll(".assign-chip").forEach((c) => c.classList.remove("selected"));
 
@@ -997,6 +1114,7 @@
     renderMemberList();
     renderRoutineList();
     updateSyncUi();
+    updateBackupHint();
     famModal.hidden = false;
     document.getElementById("memberName").focus();
   }
@@ -1012,13 +1130,19 @@
       li.className = "member-row";
       li.style.animationDelay = `${i * 40}ms`;
 
+      const freq = r.freq || "weekly";
       const day = document.createElement("span");
       day.className = "routine-day";
-      day.textContent = SHORT[r.dayIdx] || "?";
+      day.textContent = freq === "daily" ? "Tgl." : freq === "weekdays" ? "Mo–Fr" : freq === "monthly" ? `${r.monthDay || "?"}.` : SHORT[r.dayIdx] || "?";
+      day.title = FREQ_TEXT[freq];
 
       const name = document.createElement("span");
       name.className = "member-name";
       name.textContent = r.text + (r.time ? ` · ${r.time}` : "");
+      const sub = document.createElement("small");
+      sub.className = "routine-freq";
+      sub.textContent = FREQ_KURZ[freq];
+      name.appendChild(sub);
 
       const del = document.createElement("button");
       del.className = "member-del";
@@ -1432,6 +1556,17 @@
     if (!r.ok) throw new Error(`store ${r.status}`);
   }
 
+  // Alten Speicher leeren, damit ein weitergegebener Link auch die alte
+  // Momentaufnahme nicht mehr hergibt
+  async function wipeGroup(g) {
+    const keys = ["meta", ...new Set(Object.keys(data).filter((d) => (data[d] || []).length).map((d) => `w${weekKeyOfDay(d)}`))];
+    await Promise.all(
+      keys.map((k) =>
+        fetch(`${STORE_WRITE}?key=${encodeURIComponent(`wp-${g.bucket}-${k}`)}&value=`, { method: "POST" }).catch(() => {})
+      )
+    );
+  }
+
   /* --- Zusammenführen: neuere Änderung gewinnt, Löschung per Grabstein --- */
 
   function mergeEntities(localArr, remoteArr, tombMap) {
@@ -1714,6 +1849,21 @@
       document.getElementById("inviteLink").select();
       showToast("Bitte manuell kopieren (Strg+C).");
     }
+  });
+
+  // Neuen Schlüssel erzeugen: alte Einladungslinks werden damit wertlos
+  document.getElementById("rotateGroup").addEventListener("click", async () => {
+    if (!group) return;
+    const alt = group;
+    setGroup({
+      bucket: bytesToB64u(crypto.getRandomValues(new Uint8Array(12))),
+      key: bytesToB64u(crypto.getRandomValues(new Uint8Array(32))),
+    });
+    markAllDirty();
+    await pushNow();          // erst alles im neuen Speicher sichern …
+    await wipeGroup(alt);     // … dann den alten leeren
+    updateSyncUi();
+    showToast("Neuer Schlüssel aktiv — alte Links führen ins Leere. Teile den neuen Link mit der Familie.");
   });
 
   document.getElementById("leaveGroup").addEventListener("click", () => {
@@ -2221,6 +2371,23 @@
 
   /* ---------- Daten sichern & laden ---------- */
 
+  const BACKUP_KEY = "wochenplaner.lastBackup";
+
+  // Der Gratis-Speicher gibt keine Garantie — deshalb ans Sichern erinnern
+  function updateBackupHint() {
+    const hint = document.getElementById("backupHint");
+    if (!hint) return;
+    const anzahl = Object.values(data).reduce((s, l) => s + l.length, 0);
+    if (anzahl < 5) { hint.hidden = true; return; }
+    const letzte = Number(localStorage.getItem(BACKUP_KEY) || 0);
+    const tage = letzte ? Math.floor((Date.now() - letzte) / 86400000) : null;
+    if (letzte && tage < 30) { hint.hidden = true; return; }
+    hint.hidden = false;
+    document.getElementById("backupHintText").textContent = letzte
+      ? `Deine letzte Sicherung ist ${tage} Tage her. Der Online-Speicher ist kostenlos und ohne Garantie — lade euch sicherheitshalber eine Kopie herunter.`
+      : "Du hast noch nie gesichert. Der Online-Speicher ist kostenlos und ohne Garantie — lade euch einmal eine Kopie herunter und leg sie beiseite.";
+  }
+
   document.getElementById("exportBtn").addEventListener("click", () => {
     const backup = {
       app: "wochenplaner",
@@ -2238,7 +2405,9 @@
     a.download = `wochenplaner-sicherung-${toKey(new Date())}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
-    showToast("Sicherung heruntergeladen.");
+    localStorage.setItem(BACKUP_KEY, String(Date.now()));
+    updateBackupHint();
+    showToast("Sicherung heruntergeladen — leg die Datei gut weg.");
   });
 
   const importFile = document.getElementById("importFile");

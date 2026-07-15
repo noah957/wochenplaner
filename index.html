@@ -20,7 +20,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=Plus+Jakarta+Sans:wght@300..700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=17">
+<link rel="stylesheet" href="style.css?v=18">
 </head>
 <body>
   <div class="grain" aria-hidden="true"></div>
@@ -182,8 +182,16 @@
             <a id="waShare" class="pill-btn" target="_blank" rel="noopener">Per WhatsApp einladen</a>
             <button id="leaveGroup" type="button" class="pill-btn">Verlassen</button>
           </div>
+          <div class="sync-row">
+            <button id="rotateGroup" type="button" class="pill-btn danger-btn" title="Alte Einladungslinks ungültig machen">Neuen Schlüssel erzeugen</button>
+          </div>
         </div>
         <p class="modal-hint">Eure Daten werden auf dem Gerät verschlüsselt, bevor sie den Speicher erreichen — lesbar nur mit dem Einladungslink. Teilt den Link deshalb nur mit der Familie. Eine Kopie bleibt immer auf jedem Gerät, auch offline.</p>
+      </div>
+
+      <div id="backupHint" class="backup-hint" hidden>
+        <strong>Sicherung empfohlen</strong>
+        <p id="backupHintText"></p>
       </div>
 
       <div class="backup-row">
@@ -242,12 +250,14 @@
 
         <section class="help-section">
           <h3><svg viewBox="0 0 16 16" fill="none"><path d="M3 8a5 5 0 0 1 8.5-3.6M13 8a5 5 0 0 1-8.5 3.6M11.5 1.6v2.8h-2.8M4.5 14.4v-2.8h2.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Routinen</h3>
-          <p>Der <strong>↻-Knopf</strong> beim Anlegen macht eine Aufgabe zur Wochen-Routine — sie erscheint automatisch jede Woche am selben Tag. Einmal löschen überspringt nur diese Woche; ganz beenden unter <strong>Familie → Wöchentliche Routinen</strong>. Mit <strong>„Vorwoche übernehmen"</strong> holst du alle offenen Aufgaben der letzten Woche nach.</p>
+          <p>Der <strong>↻-Knopf</strong> beim Anlegen macht eine Aufgabe zur Routine. Tippe ihn mehrmals, um die Wiederholung zu wählen: <strong>wöchentlich → täglich → Mo–Fr → 2-wöchentlich → monatlich</strong> (perfekt für die Müllabfuhr). Löschst du einen einzelnen Termin, wird nur dieser übersprungen; ganz beenden unter <strong>Familie → Wöchentliche Routinen</strong>. Mit <strong>„Vorwoche übernehmen"</strong> holst du alle offenen Aufgaben der letzten Woche nach.</p>
+          <p><strong>Eigene Reihenfolge:</strong> Zieh Aufgaben innerhalb eines Tages einfach an die gewünschte Stelle — ab dann bleibt dieser Tag in deiner Reihenfolge, neue Aufgaben landen unten.</p>
         </section>
 
         <section class="help-section">
           <h3><svg viewBox="0 0 16 16" fill="none"><path d="M4.5 12.5a3 3 0 0 1-.4-6A4 4 0 0 1 12 5.6a2.8 2.8 0 0 1-.4 6.9H4.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>Handy-Sync</h3>
           <p>Unter <strong>Familie → Handy-Sync</strong> tippt ihr auf <strong>„Gruppe erstellen"</strong> — fertig, kein Konto nötig. Dann den <strong>Einladungslink</strong> per WhatsApp an die Familie schicken: Link öffnen, „Beitreten" tippen, und alle Geräte gleichen sich automatisch ab. Alles wird verschlüsselt übertragen.</p>
+          <p><strong>Wichtig:</strong> Der Link ist der Schlüssel — wer ihn hat, kommt rein. Ist er in falsche Hände geraten (weitergeleitet, altes Handy verkauft), tippe auf <strong>„Neuen Schlüssel erzeugen"</strong>: Alte Links führen dann ins Leere, und ihr verteilt den neuen. Weil der Online-Speicher kostenlos und ohne Garantie ist, lade dir ab und zu über <strong>„Daten sichern"</strong> eine Kopie herunter — die App erinnert dich daran.</p>
         </section>
 
         <section class="help-section">
@@ -445,6 +455,6 @@
 
   <datalist id="choreSuggestions"></datalist>
 
-  <script src="app.js?v=17"></script>
+  <script src="app.js?v=18"></script>
 </body>
 </html>
