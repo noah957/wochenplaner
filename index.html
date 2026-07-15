@@ -154,6 +154,16 @@
           </div>
         </div>
         <div id="syncOn" hidden>
+          <div id="syncActivate" class="sync-activate" hidden>
+            <strong>Fast fertig — Sync aktivieren</strong>
+            <p>Der Speicher schickt eine Bestätigungs-Mail an <span id="syncActivateEmail"></span>. Öffne sie einmalig und klicke den Link (oder fordere ihn unten neu an). Danach gleichen sich alle Geräte automatisch ab — du musst nichts weiter tun.</p>
+            <a id="activateLink" class="pill-btn cta" href="https://kvdb.io/login" target="_blank" rel="noopener">
+              <span>E-Mail-Bestätigung öffnen</span>
+              <span class="cta-icon">
+                <svg viewBox="0 0 16 16" fill="none"><path d="m6 3 5 5-5 5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+            </a>
+          </div>
           <p id="syncStatus" class="sync-status"></p>
           <div class="sync-row">
             <input id="inviteLink" type="text" readonly>
@@ -164,7 +174,7 @@
             <button id="leaveGroup" type="button" class="pill-btn">Verlassen</button>
           </div>
         </div>
-        <p class="modal-hint">Eure Daten werden auf dem Gerät verschlüsselt, bevor sie den Speicherdienst (kvdb.io) erreichen — lesbar nur mit dem Einladungslink. Teilt den Link deshalb nur mit der Familie. Nach dem Erstellen einmalig die Bestätigungs-E-Mail von kvdb.io anklicken (auf kvdb.io/login anforderbar), dann läuft der Abgleich automatisch.</p>
+        <p class="modal-hint">Eure Daten werden auf dem Gerät verschlüsselt, bevor sie den Speicherdienst (kvdb.io) erreichen — lesbar nur mit dem Einladungslink. Teilt den Link deshalb nur mit der Familie. Nur beim ersten Erstellen ist eine einmalige E-Mail-Bestätigung nötig (die App führt dich hin); danach läuft der Abgleich für immer automatisch.</p>
       </div>
 
       <div class="backup-row">

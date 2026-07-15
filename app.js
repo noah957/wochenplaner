@@ -951,24 +951,33 @@
 
   /* ---------- Interaktive Tour: jeder Knopf wird markiert und erklärt ---------- */
 
+  const TOUR_ICONS = {
+    person: '<circle cx="8" cy="5.5" r="2.6" stroke="currentColor" stroke-width="1.3"/><path d="M3 13.5c.5-2.8 2.4-4.2 5-4.2s4.5 1.4 5 4.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>',
+    family: '<circle cx="6" cy="5.5" r="2.3" stroke="currentColor" stroke-width="1.3"/><path d="M2 13c.4-2.3 2-3.5 4-3.5s3.6 1.2 4 3.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="11.5" cy="6" r="1.8" stroke="currentColor" stroke-width="1.3"/><path d="M11 9.6c1.7.1 2.8 1.1 3.1 2.9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>',
+    redo: '<path d="M3 8a5 5 0 1 1 1.5 3.6M3 12V8.8h3.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>',
+    days: '<rect x="2" y="3" width="12" height="10" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="M2 6.5h12M5.5 3V1.8M10.5 3V1.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>',
+    plus: '<path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>',
+    hand: '<circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2.5 2"/><path d="M8 5.5v3l2 1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>',
+    bell: '<path d="M8 2.2a4 4 0 0 0-4 4v2.6L2.8 11h10.4L12 8.8V6.2a4 4 0 0 0-4-4Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M6.6 13a1.5 1.5 0 0 0 2.8 0" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>',
+    repeat: '<path d="M3 8a5 5 0 0 1 8.5-3.6M13 8a5 5 0 0 1-8.5 3.6M11.5 1.6v2.8h-2.8M4.5 14.4v-2.8h2.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>',
+    lock: '<rect x="3.5" y="7" width="9" height="6" rx="1.5" stroke="currentColor" stroke-width="1.3"/><path d="M5.5 7V5.5a2.5 2.5 0 0 1 5 0V7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>',
+    dot: '<circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="6.3" stroke="currentColor" stroke-width="1.1" opacity="0.4"/>',
+    heart: '<path d="M8 13.4 3.4 8.8a3 3 0 0 1 4.2-4.2l.4.4.4-.4a3 3 0 0 1 4.2 4.2L8 13.4Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>',
+  };
+
+  // Nur die Knöpfe, die man wirklich erklärt bekommen muss
   const TOUR_STEPS = [
-    { sel: "#meBtn", title: "Wer bist du?", text: "Tippe hier und wähle deinen Namen. Dann weiß die App, wessen Erinnerungen und Aufgaben sie dir zeigen soll — die Wahl gilt nur für dieses Gerät." },
-    { sel: ".nav-controls", title: "Wochen blättern", text: "Mit den Pfeilen springst du eine Woche vor oder zurück. In der Mitte siehst du immer, welche Woche gerade angezeigt wird." },
-    { sel: "#todayBtn", title: "Zurück zu heute", text: "Egal wo du gelandet bist — ein Tipp bringt dich zur aktuellen Woche und zum heutigen Tag zurück." },
-    { sel: "#copyPrevBtn", title: "Vorwoche übernehmen", text: "Holt alle offenen (nicht abgehakten) Aufgaben der letzten Woche in diese Woche — praktisch für den Wochenstart." },
-    { sel: "#famBtn", title: "Familie & Sync", text: "Hier legt ihr eure Mitglieder an, verwaltet Routinen, sichert eure Daten — und verbindet eure Handys über den Einladungslink." },
-    { sel: "#privacyBtn", title: "Privates verstecken", text: "Blendet alle als privat markierten Aufgaben mit einem Tipp aus — gut, wenn die ganze Familie gerade mitschaut." },
-    { sel: "#helpBtn", title: "Anleitung", text: "Öffnet das Nachschlagewerk mit allen Funktionen — und von dort kannst du diese Tour jederzeit neu starten." },
-    { sel: "#themeBtn", title: "Hell & Dunkel", text: "Wechselt zwischen hellem und dunklem Design — mit einer kleinen Show beim Umschalten." },
-    { sel: ".statsbar", title: "Wochen-Fortschritt", text: "Zeigt, wie viel ihr diese Woche schon geschafft habt. Bei 100 % gibt es Konfetti!" },
-    { sel: ".day-strip", title: "Tage wechseln", text: "Tippe auf einen Tag oder wische auf dem Board nach links und rechts. Der orange Punkt zeigt: Hier wartet eine Erinnerung auf dich.", onlyIf: () => mobileQuery.matches },
-    { sel: ".add-ghost", title: "Aufgabe hinzufügen", text: "Tippe hier, um eine neue Aufgabe für diesen Tag anzulegen. Beim Tippen bekommst du Vorschläge aus euren bisherigen Aufgaben." },
-    { sel: ".assign-chips", title: "Wer übernimmt's?", text: "Tippe auf einen Avatar, um die Aufgabe direkt jemandem zu geben. Ohne Auswahl bleibt sie offen — wer zuerst tippt, übernimmt.", prep: "composer", onlyIf: () => members.length > 0 },
-    { sel: ".bell-btn", title: "Erinnerung senden", text: "Macht aus der Aufgabe eine persönliche Erinnerung: Nur der gewählte Empfänger (und du) bekommt sie zu sehen.", prep: "composer" },
-    { sel: ".repeat-btn", title: "Wochen-Routine", text: "Lässt die Aufgabe automatisch jede Woche am selben Tag wieder erscheinen — perfekt für Mülltonnen & Co.", prep: "composer" },
-    { sel: ".lock-btn", title: "Privat markieren", text: "Kennzeichnet die Aufgabe als privat. Mit dem Auge-Knopf oben lässt sich alles Private ausblenden.", prep: "composer" },
-    { sel: ".prio-btn", title: "Priorität", text: "Tippe den Punkt: grün (niedrig) → gelb (mittel) → rot (hoch). Wichtiges rückt in der Liste automatisch nach oben.", prep: "composer" },
-    { sel: "#forYou", title: "Für dich", text: "Deine Woche auf einen Blick: alle Erinnerungen an dich und deine Aufgaben. Antippen springt direkt zum richtigen Tag.", onlyIf: () => !document.getElementById("forYou").hidden },
+    { sel: "#meBtn", ico: "person", title: "Wer bist du?", text: "Tippe hier und wähle deinen Namen — dann zeigt dir die App deine Erinnerungen und Aufgaben. Die Wahl gilt nur für dieses Gerät." },
+    { sel: "#famBtn", ico: "family", title: "Familie & Sync", text: "Hier legt ihr eure Mitglieder an, verwaltet Routinen — und verbindet eure Handys über den Einladungslink." },
+    { sel: "#copyPrevBtn", ico: "redo", title: "Vorwoche übernehmen", text: "Holt alle offenen Aufgaben der letzten Woche in diese Woche — praktisch für den Wochenstart." },
+    { sel: ".day-strip", ico: "days", title: "Tage wechseln", text: "Tippe auf einen Tag oder wische einfach nach links und rechts. Der orange Punkt zeigt: Hier wartet eine Erinnerung auf dich.", onlyIf: () => mobileQuery.matches },
+    { sel: ".add-ghost", ico: "plus", title: "Aufgabe hinzufügen", text: "Ein Tipp öffnet die Eingabe. Beim Tippen bekommst du Vorschläge aus euren bisherigen Aufgaben." },
+    { sel: ".assign-chips", ico: "hand", title: "Wer übernimmt's?", text: "Tippe auf einen Avatar, um die Aufgabe jemandem zu geben. Ohne Auswahl bleibt sie offen — wer zuerst tippt, übernimmt.", prep: "composer", onlyIf: () => members.length > 0 },
+    { sel: ".bell-btn", ico: "bell", title: "Erinnerung senden", text: "Macht aus der Aufgabe eine persönliche Erinnerung — nur der gewählte Empfänger (und du) bekommt sie zu sehen.", prep: "composer" },
+    { sel: ".repeat-btn", ico: "repeat", title: "Wochen-Routine", text: "Die Aufgabe erscheint automatisch jede Woche am selben Tag wieder — perfekt für Mülltonnen & Co.", prep: "composer" },
+    { sel: ".lock-btn", ico: "lock", title: "Privat markieren", text: "Kennzeichnet die Aufgabe als privat. Mit dem Auge-Knopf oben blendest du alles Private mit einem Tipp aus.", prep: "composer" },
+    { sel: ".prio-btn", ico: "dot", title: "Priorität", text: "Tippe den Punkt: grün → gelb → rot. Wichtiges rückt in der Tagesliste automatisch nach oben.", prep: "composer" },
+    { sel: "#forYou", ico: "heart", title: "Für dich", text: "Deine Woche auf einen Blick: alle Erinnerungen an dich und deine Aufgaben. Antippen springt direkt zum richtigen Tag.", onlyIf: () => !document.getElementById("forYou").hidden },
   ];
 
   let tourIdx = -1;
@@ -1053,36 +1062,59 @@
       const br = parseFloat(getComputedStyle(target).borderRadius) || 12;
       ring.style.borderRadius = `${Math.min(br + pad, (r.height + pad * 2) / 2)}px`;
 
-      const remaining = TOUR_STEPS.slice(tourIdx).filter((s) => !s.onlyIf || s.onlyIf()).length;
-      const total = TOUR_STEPS.filter((s) => !s.onlyIf || s.onlyIf()).length;
+      const active = TOUR_STEPS.filter((s) => !s.onlyIf || s.onlyIf());
+      const total = active.length;
+      const current = total - TOUR_STEPS.slice(tourIdx).filter((s) => !s.onlyIf || s.onlyIf()).length + 1;
+
       tip.innerHTML = "";
-      const eyebrow = document.createElement("span");
-      eyebrow.className = "eyebrow";
-      eyebrow.textContent = `Schritt ${total - remaining + 1} von ${total}`;
+      const head = document.createElement("div");
+      head.className = "tour-head";
+      const ico = document.createElement("span");
+      ico.className = "tour-ico";
+      ico.innerHTML = `<svg viewBox="0 0 16 16" fill="none" aria-hidden="true">${TOUR_ICONS[step.ico] || TOUR_ICONS.plus}</svg>`;
       const h = document.createElement("h3");
       h.textContent = step.title;
+      head.append(ico, h);
+
       const p = document.createElement("p");
       p.textContent = step.text;
+
       const foot = document.createElement("div");
       foot.className = "tour-foot";
+      const dots = document.createElement("span");
+      dots.className = "tour-dots";
+      for (let d = 0; d < total; d++) {
+        const dot = document.createElement("i");
+        if (d < current) dot.classList.add("on");
+        if (d === current - 1) dot.classList.add("now");
+        dots.appendChild(dot);
+      }
+      const btns = document.createElement("span");
+      btns.className = "tour-btns";
       const quit = document.createElement("button");
       quit.className = "tour-quit";
-      quit.textContent = "Tour beenden";
+      quit.textContent = "Beenden";
       quit.addEventListener("click", (e) => { e.stopPropagation(); endTour(); });
       const next = document.createElement("button");
       next.className = "tour-next";
-      next.textContent = remaining > 1 ? "Weiter" : "Fertig";
+      next.innerHTML = current < total
+        ? 'Weiter <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m6 3.5 4.5 4.5L6 12.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+        : 'Fertig <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
       next.addEventListener("click", (e) => { e.stopPropagation(); showTourStep(tourIdx + 1); });
-      foot.append(quit, next);
-      tip.append(eyebrow, h, p, foot);
+      btns.append(quit, next);
+      foot.append(dots, btns);
+      tip.append(head, p, foot);
 
-      // Tooltip unter- oder oberhalb platzieren, im Fenster halten
-      const tipH = 150;
+      // Karte unter- oder oberhalb platzieren, Pfeil zeigt aufs Ziel
+      const tipH = 170;
       const below = r.bottom + tipH + 20 < window.innerHeight;
-      tip.style.top = below ? `${r.bottom + pad + 12}px` : "";
-      tip.style.bottom = below ? "" : `${window.innerHeight - r.top + pad + 12}px`;
-      const left = Math.max(16, Math.min(r.left, window.innerWidth - tip.offsetWidth - 16));
+      tip.classList.toggle("above", !below);
+      tip.style.top = below ? `${r.bottom + pad + 14}px` : "";
+      tip.style.bottom = below ? "" : `${window.innerHeight - r.top + pad + 14}px`;
+      const left = Math.max(16, Math.min(r.left + r.width / 2 - 150, window.innerWidth - tip.offsetWidth - 16));
       tip.style.left = `${left}px`;
+      const arrowX = Math.max(18, Math.min(r.left + r.width / 2 - left - 7, tip.offsetWidth - 32));
+      tip.style.setProperty("--ax", `${arrowX}px`);
       tip.classList.remove("tip-anim");
       void tip.offsetWidth;
       tip.classList.add("tip-anim");
@@ -1202,19 +1234,24 @@
     return r.text();
   }
 
-  let mail403Warned = false;
-
   async function kvPut(k, body) {
     const r = await fetch(`${KV_BASE}/${group.bucket}/${k}`, { method: "PUT", body });
     if (r.status === 403) {
-      if (!mail403Warned) {
-        mail403Warned = true;
-        showToast("Fast geschafft: Bestätige noch die E-Mail vom Speicherdienst (kvdb.io) — danach synct alles automatisch.");
-      }
+      setPendingVerify(true);
       throw new Error("kv 403");
     }
-    mail403Warned = false;
+    setPendingVerify(false);
     if (!r.ok) throw new Error(`kv ${r.status}`);
+  }
+
+  // Speicher noch nicht freigeschaltet? Banner steuern.
+  function setPendingVerify(on) {
+    if (!group) return;
+    if (!!group.pendingVerify === on) { updateSyncUi(); return; }
+    group.pendingVerify = on;
+    localStorage.setItem(GROUP_KEY, JSON.stringify(group));
+    if (!on) showToast("Sync ist jetzt aktiv — eure Geräte gleichen sich ab ✨");
+    updateSyncUi();
   }
 
   /* --- Zusammenführen: neuere Änderung gewinnt, Löschung per Grabstein --- */
@@ -1377,8 +1414,30 @@
     off.hidden = !!group;
     on.hidden = !group;
     if (group) {
-      const t = lastSync ? new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" }).format(lastSync) : "–";
-      document.getElementById("syncStatus").textContent = `Gruppe verbunden · zuletzt abgeglichen ${t} Uhr`;
+      const banner = document.getElementById("syncActivate");
+      const status = document.getElementById("syncStatus");
+      if (group.pendingVerify) {
+        banner.hidden = false;
+        status.classList.add("pending");
+        if (group.email) {
+          // Ersteller: eigene Aktivierung nötig
+          document.getElementById("syncActivateEmail").textContent = group.email;
+          document.getElementById("activateLink").hidden = false;
+          status.textContent = "Warte auf E-Mail-Bestätigung…";
+        } else {
+          // Beigetreten: der Ersteller muss noch bestätigen
+          banner.querySelector("strong").textContent = "Sync fast bereit";
+          banner.querySelector("p").textContent =
+            "Die Person, die diese Gruppe erstellt hat, muss ihre Bestätigungs-Mail noch anklicken. Danach gleicht sich alles automatisch ab — du musst nichts tun.";
+          document.getElementById("activateLink").hidden = true;
+          status.textContent = "Warte auf Freischaltung durch den Ersteller…";
+        }
+      } else {
+        banner.hidden = true;
+        status.classList.remove("pending");
+        const t = lastSync ? new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" }).format(lastSync) : "–";
+        status.textContent = `Gruppe verbunden · zuletzt abgeglichen ${t} Uhr`;
+      }
       document.getElementById("inviteLink").value = inviteLink();
       document.getElementById("waShare").href =
         `https://wa.me/?text=${encodeURIComponent("Komm in unseren Familien-Wochenplaner! Öffne den Link auf deinem Handy: " + inviteLink())}`;
@@ -1419,7 +1478,9 @@
       const bucket = (await r.text()).trim();
       if (!r.ok || !/^[A-Za-z0-9_-]{8,}$/.test(bucket)) throw new Error("bucket");
       const key = bytesToB64u(crypto.getRandomValues(new Uint8Array(32)));
-      await joinGroup({ bucket, key });
+      // Frische Buckets müssen per E-Mail freigeschaltet werden -> Banner sofort zeigen
+      await joinGroup({ bucket, key, email, pendingVerify: true });
+      window.open("https://kvdb.io/login", "_blank", "noopener");
     } catch {
       showToast("Gruppe konnte nicht erstellt werden — bitte später erneut versuchen.");
     }
@@ -1485,13 +1546,15 @@
   maybeOfferJoin();
 
   // regelmäßig abgleichen, solange die App sichtbar ist
-  if (group) setTimeout(pullNow, 800);
-  setInterval(() => {
-    if (group && document.visibilityState === "visible") pullNow();
-  }, 60000);
-  document.addEventListener("visibilitychange", () => {
-    if (group && document.visibilityState === "visible") pullNow();
-  });
+  function syncTick() {
+    if (!group || document.visibilityState !== "visible") return;
+    pullNow();
+    // Nach der Freischaltung liegen gebliebene Daten erneut hochladen
+    if (group.pendingVerify) { markAllDirty(); pushNow(); }
+  }
+  if (group) setTimeout(syncTick, 800);
+  setInterval(syncTick, 30000);
+  document.addEventListener("visibilitychange", syncTick);
 
   /* ---------- "wer bist du?" (Profil pro Gerät) ---------- */
 
