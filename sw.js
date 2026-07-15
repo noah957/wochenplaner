@@ -1,9 +1,9 @@
-const VERSION = "wochenplaner-v15";
+const VERSION = "wochenplaner-v16";
 const CORE = [
   "./",
   "./index.html",
-  "./style.css",
-  "./app.js",
+  "./style.css?v=16",
+  "./app.js?v=16",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png",

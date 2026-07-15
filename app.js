@@ -8,6 +8,7 @@
   const SKIPS_KEY = "wochenplaner.routineSkips.v1";
   const GROUP_KEY = "wochenplaner.group.v1";
   const TOMBS_KEY = "wochenplaner.tombstones.v1";
+  const SHOP_KEY = "wochenplaner.shop.v1";
   // Speicher ohne Konto/Anmeldung; Inhalte sind vor dem Upload verschlüsselt
   const STORE_READ = "https://textdb.online/";
   const STORE_WRITE = "https://textdb.online/update/";
@@ -41,7 +42,9 @@
   let routines = loadJSON(ROUTINES_KEY, []);
   let routineSkips = new Set(loadJSON(SKIPS_KEY, []));
   let group = loadJSON(GROUP_KEY, null); // {bucket, key} für den Handy-Sync
-  let tombs = loadJSON(TOMBS_KEY, { tasks: {}, members: {}, routines: {} });
+  let tombs = loadJSON(TOMBS_KEY, { tasks: {}, members: {}, routines: {}, shop: {} });
+  if (!tombs.shop) tombs.shop = {};
+  let shop = loadJSON(SHOP_KEY, []);
   let currentWeekStart = startOfWeek(new Date());
   let dragInfo = null;
   let filterMember = null; // null = alle, "open" = nicht zugewiesen, sonst member.id
@@ -74,6 +77,10 @@
   function saveRoutines() {
     localStorage.setItem(ROUTINES_KEY, JSON.stringify(routines));
     localStorage.setItem(SKIPS_KEY, JSON.stringify([...routineSkips]));
+  }
+
+  function saveShop() {
+    localStorage.setItem(SHOP_KEY, JSON.stringify(shop));
   }
 
   // Routinen für die angezeigte Woche anlegen (einmal pro Woche, überspringt Gelöschtes)
@@ -473,6 +480,22 @@
         frag.querySelector(".task-from").textContent = sender ? `von ${sender.name}` : "";
       }
       if (task.routineId) li.classList.add("is-routine");
+      const noteEl = frag.querySelector(".task-note");
+      if (task.note) {
+        li.classList.add("has-note");
+        noteEl.textContent = task.note;
+      }
+      frag.querySelector(".task-note-btn").addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        li.classList.add("has-note");
+        startNoteEdit(noteEl, task, dayKey, li);
+      });
+      noteEl.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        startNoteEdit(noteEl, task, dayKey, li);
+      });
       timeEl.textContent = task.time || "";
       textEl.textContent = task.text;
       prioEl.dataset.p = task.prio || "none";
@@ -600,6 +623,45 @@
 
   function initials(name) {
     return name.trim().slice(0, 2).toUpperCase();
+  }
+
+  function startNoteEdit(noteEl, task, dayKey, li) {
+    noteEl.contentEditable = "true";
+    noteEl.dataset.ph = "Notiz…";
+    noteEl.focus();
+    const range = document.createRange();
+    range.selectNodeContents(noteEl);
+    range.collapse(false);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    const finish = (commit) => {
+      noteEl.contentEditable = "false";
+      const next = noteEl.textContent.trim();
+      if (commit && next !== (task.note || "")) {
+        task.note = next;
+        touch(task);
+        markDirty(weekKeyOfDay(dayKey));
+        saveData();
+      }
+      noteEl.textContent = task.note || "";
+      li.classList.toggle("has-note", !!task.note);
+    };
+
+    noteEl.addEventListener("blur", () => finish(true), { once: true });
+    noteEl.addEventListener("keydown", function onKey(e) {
+      e.stopPropagation();
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        noteEl.removeEventListener("keydown", onKey);
+        noteEl.blur();
+      } else if (e.key === "Escape") {
+        noteEl.removeEventListener("keydown", onKey);
+        noteEl.textContent = task.note || "";
+        noteEl.blur();
+      }
+    });
   }
 
   function startInlineEdit(textEl, task, dayKey) {
@@ -759,6 +821,7 @@
         private: isPrivate,
         kind: isReminder ? "reminder" : "task",
         from: isReminder ? me : null,
+        note: "",
         done: false,
         u: Date.now(),
       };
@@ -929,7 +992,7 @@
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       if (!famModal.hidden) closeFamModal();
-      ["meModal", "helpModal", "joinModal"].forEach((id) => {
+      ["meModal", "helpModal", "joinModal", "shopModal", "recapModal"].forEach((id) => {
         const m = document.getElementById(id);
         if (!m.hidden) m.hidden = true;
       });
@@ -1309,19 +1372,23 @@
     if (!remote) return false;
 
     if (k === "meta") {
-      const before = JSON.stringify([members, routines, [...routineSkips].sort()]);
+      const before = JSON.stringify([members, routines, [...routineSkips].sort(), shop]);
       tombs = {
         tasks: mergeTombMaps(tombs.tasks, remote.tombs && remote.tombs.tasks),
         members: mergeTombMaps(tombs.members, remote.tombs && remote.tombs.members),
         routines: mergeTombMaps(tombs.routines, remote.tombs && remote.tombs.routines),
+        shop: mergeTombMaps(tombs.shop, remote.tombs && remote.tombs.shop),
       };
       members = mergeEntities(members, remote.members, tombs.members);
       routines = mergeEntities(routines, remote.routines, tombs.routines);
+      shop = mergeEntities(shop, remote.shop, tombs.shop);
       (remote.skips || []).forEach((s) => routineSkips.add(s));
       saveMembers();
       saveRoutines();
+      saveShop();
       saveTombs();
-      return JSON.stringify([members, routines, [...routineSkips].sort()]) !== before;
+      renderShop();
+      return JSON.stringify([members, routines, [...routineSkips].sort(), shop]) !== before;
     }
 
     const weekKey = k.slice(1);
@@ -1344,8 +1411,39 @@
   function pullNow() { return queueSync(doPull); }
   function pushNow() { return queueSync(doPush); }
 
+  /* --- Statusanzeige: abgeglichen / überträgt / offline --- */
+
+  let syncState = "ok"; // ok | busy | offline
+
+  function setSyncState(s) {
+    syncState = s;
+    const chip = document.getElementById("syncChip");
+    if (!chip) return;
+    chip.hidden = !group;
+    if (!group) return;
+    chip.classList.toggle("busy", s === "busy");
+    chip.classList.toggle("offline", s === "offline");
+    const txt = document.getElementById("syncChipText");
+    const zeit = lastSync
+      ? new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" }).format(lastSync)
+      : null;
+    if (s === "busy") {
+      txt.textContent = "Überträgt…";
+      chip.title = "Daten werden gerade abgeglichen";
+    } else if (s === "offline") {
+      txt.textContent = "Offline";
+      chip.title = zeit
+        ? `Kein Kontakt zum Speicher — zuletzt abgeglichen ${zeit} Uhr. Änderungen werden nachgeholt.`
+        : "Kein Kontakt zum Speicher — Änderungen werden nachgeholt, sobald ihr wieder online seid.";
+    } else {
+      txt.textContent = "Abgeglichen";
+      chip.title = zeit ? `Alles synchron · zuletzt ${zeit} Uhr` : "Alles synchron";
+    }
+  }
+
   async function doPull() {
     if (!group) return;
+    setSyncState("busy");
     try {
       const shownWeek = toKey(currentWeekStart);
       const todayWeek = toKey(startOfWeek(new Date()));
@@ -1358,14 +1456,16 @@
       lastSync = Date.now();
       if (changed) safeRender();
       updateSyncUi();
+      setSyncState(dirty.size ? "busy" : "ok");
     } catch {
-      /* offline oder Dienst nicht erreichbar — nächster Versuch kommt */
+      setSyncState("offline"); // nächster Versuch kommt automatisch
     }
     if (dirty.size) pushNow();
   }
 
   async function doPush() {
     if (!group || !dirty.size) return;
+    setSyncState("busy");
     const items = [...dirty];
     dirty.clear();
     try {
@@ -1373,7 +1473,7 @@
         // erst zusammenführen, dann schreiben — so überschreibt niemand die anderen
         if (k === "meta") {
           await mergeRemoteKey("meta");
-          await kvPut("meta", await encPayload({ members, routines, skips: [...routineSkips], tombs, u: Date.now() }));
+          await kvPut("meta", await encPayload({ members, routines, shop, skips: [...routineSkips], tombs, u: Date.now() }));
         } else {
           await mergeRemoteKey(`w${k}`);
           await kvPut(`w${k}`, await encPayload({ tasks: collectWeekTasks(k), u: Date.now() }));
@@ -1382,8 +1482,10 @@
       lastSync = Date.now();
       safeRender();
       updateSyncUi();
+      setSyncState("ok");
     } catch {
       items.forEach((i) => dirty.add(i)); // beim nächsten Versuch erneut senden
+      setSyncState("offline");
       clearTimeout(pushTimer);
       pushTimer = setTimeout(pushNow, 4000);
     }
@@ -1440,7 +1542,16 @@
     if (g) localStorage.setItem(GROUP_KEY, JSON.stringify(g));
     else localStorage.removeItem(GROUP_KEY);
     updateSyncUi();
+    setSyncState(g ? "busy" : "ok");
   }
+
+  document.getElementById("syncChip").addEventListener("click", () => {
+    if (syncState === "offline") { pullNow(); pushNow(); showToast("Neuer Verbindungsversuch läuft…"); }
+    else openFamModal();
+  });
+
+  window.addEventListener("online", () => { if (group) { pullNow(); pushNow(); } });
+  window.addEventListener("offline", () => { if (group) setSyncState("offline"); });
 
   function parseJoinCode(input) {
     const m = String(input).match(/#join=([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{20,})/) ||
@@ -1531,6 +1642,7 @@
     pullNow();
     if (dirty.size) pushNow();
   }
+  setSyncState(group ? "busy" : "ok"); // Chip beim Start sofort anzeigen
   if (group) setTimeout(syncTick, 500);
   setInterval(syncTick, 15000);
   document.addEventListener("visibilitychange", syncTick);
@@ -1619,6 +1731,372 @@
 
   paintMeBtn();
 
+  /* ---------- Wochenrückblick & Punkte ---------- */
+
+  // Punkte: Aufgabe = 1, mittlere Priorität = 2, hohe = 3
+  const PUNKTE = { none: 1, low: 1, med: 2, high: 3 };
+  const recapModal = document.getElementById("recapModal");
+  const recapBtn = document.getElementById("recapBtn");
+
+  function weekStats(dates) {
+    const alle = [];
+    dates.forEach((d) => alle.push(...visibleTasks(toKey(d))));
+    const erledigt = alle.filter((t) => t.done);
+    const proPerson = members.map((m) => {
+      const meine = erledigt.filter((t) => t.assignee === m.id);
+      return { m, anzahl: meine.length, punkte: meine.reduce((s, t) => s + (PUNKTE[t.prio] || 1), 0) };
+    }).sort((a, b) => b.punkte - a.punkte || b.anzahl - a.anzahl);
+    return { gesamt: alle.length, erledigt: erledigt.length, proPerson };
+  }
+
+  function updateRecapBtn(dates) {
+    if (!recapBtn) return;
+    const s = weekStats(dates);
+    // erst anbieten, wenn es etwas zu zeigen gibt
+    recapBtn.hidden = !members.length || s.gesamt === 0;
+    const istSonntag = new Date().getDay() === 0;
+    const istDieseWoche = toKey(dates[0]) === toKey(startOfWeek(new Date()));
+    document.getElementById("recapBtnText").textContent =
+      istSonntag && istDieseWoche ? "Wochenrückblick — wie lief eure Woche?" : "Wochenrückblick ansehen";
+  }
+
+  function openRecap() {
+    const dates = weekDates(currentWeekStart);
+    const s = weekStats(dates);
+    const pct = s.gesamt ? Math.round((s.erledigt / s.gesamt) * 100) : 0;
+
+    document.getElementById("recapTitle").textContent =
+      `${DATE_FMT.format(dates[0])} – ${DATE_FMT.format(dates[6])}`;
+
+    const body = document.getElementById("recapBody");
+    body.innerHTML = "";
+
+    const hero = document.createElement("div");
+    hero.className = "recap-hero";
+    const big = document.createElement("div");
+    big.className = "recap-big";
+    big.textContent = `${pct}%`;
+    const sub = document.createElement("div");
+    sub.className = "recap-sub";
+    sub.textContent = `${s.erledigt} von ${s.gesamt} Aufgaben erledigt`;
+    hero.append(big, sub);
+    body.appendChild(hero);
+
+    const max = Math.max(1, ...s.proPerson.map((p) => p.punkte));
+    s.proPerson.forEach((p, i) => {
+      const row = document.createElement("div");
+      row.className = "recap-line";
+      const av = document.createElement("span");
+      av.className = "avatar";
+      av.style.background = p.m.color;
+      av.textContent = initials(p.m.name);
+      const name = document.createElement("span");
+      name.className = "recap-name";
+      name.textContent = p.m.name;
+      if (i === 0 && p.punkte > 0 && (s.proPerson.length < 2 || p.punkte > s.proPerson[1].punkte)) {
+        const krone = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        krone.setAttribute("viewBox", "0 0 16 16");
+        krone.setAttribute("class", "crown");
+        krone.innerHTML = '<path d="M2.5 5.5 5 8l3-4 3 4 2.5-2.5-1 7h-9l-1-7Z" fill="currentColor"/>';
+        name.appendChild(krone);
+      }
+      const bar = document.createElement("span");
+      bar.className = "recap-bar";
+      const fill = document.createElement("span");
+      fill.className = "recap-fill";
+      fill.style.background = p.m.color;
+      fill.style.width = "0%";
+      bar.appendChild(fill);
+      const pts = document.createElement("span");
+      pts.className = "recap-pts";
+      pts.textContent = `${p.punkte} Pkt.`;
+      row.append(av, name, bar, pts);
+      body.appendChild(row);
+      requestAnimationFrame(() => {
+        setTimeout(() => { fill.style.width = `${Math.round((p.punkte / max) * 100)}%`; }, 80 + i * 90);
+      });
+    });
+
+    const note = document.createElement("p");
+    note.className = "recap-note";
+    const beste = s.proPerson[0];
+    if (!s.gesamt) note.textContent = "Diese Woche war noch nichts geplant.";
+    else if (pct === 100) note.textContent = "Alles geschafft — starke Woche! 🎉";
+    else if (beste && beste.punkte > 0) {
+      note.textContent = `${beste.m.name} liegt mit ${beste.punkte} Punkten vorn. Punkte gibt es pro erledigter Aufgabe: normal 1, mittlere Priorität 2, hohe 3.`;
+    } else note.textContent = "Noch nichts abgehakt — die Woche ist ja noch jung.";
+    body.appendChild(note);
+
+    recapModal.hidden = false;
+    if (pct === 100 && s.gesamt > 0) setTimeout(() => confettiBurst(big, 26), 350);
+  }
+
+  if (recapBtn) recapBtn.addEventListener("click", openRecap);
+  document.getElementById("recapClose").addEventListener("click", () => { recapModal.hidden = true; });
+  recapModal.addEventListener("click", (e) => { if (e.target === recapModal) recapModal.hidden = true; });
+
+  /* ---------- Einkaufsliste (gleicht sich über "meta" mit ab) ---------- */
+
+  const SHOP_IDEEN = ["Milch", "Brot", "Butter", "Eier", "Käse", "Kaffee", "Obst", "Gemüse", "Nudeln", "Klopapier", "Zahnpasta", "Spülmittel"];
+  const shopModal = document.getElementById("shopModal");
+
+  function shopSuggest() {
+    const zaehler = new Map();
+    shop.forEach((i) => {
+      const k = i.text.toLowerCase();
+      zaehler.set(k, (zaehler.get(k) || 0) + 1);
+    });
+    const eigene = [...zaehler.keys()].sort((a, b) => zaehler.get(b) - zaehler.get(a));
+    const gesehen = new Set();
+    const dl = document.getElementById("shopSuggestions");
+    dl.innerHTML = "";
+    [...eigene, ...SHOP_IDEEN].forEach((t) => {
+      const k = t.toLowerCase();
+      if (gesehen.has(k)) return;
+      gesehen.add(k);
+      const o = document.createElement("option");
+      o.value = t.charAt(0).toUpperCase() + t.slice(1);
+      dl.appendChild(o);
+    });
+  }
+
+  function renderShop() {
+    const list = document.getElementById("shopList");
+    if (!list) return;
+    const offen = shop.filter((i) => !i.done).length;
+
+    const badge = document.getElementById("shopCount");
+    badge.hidden = offen === 0;
+    badge.textContent = offen > 99 ? "99+" : offen;
+    document.getElementById("shopBtn").title = offen ? `Einkaufsliste — ${offen} offen` : "Einkaufsliste";
+
+    if (shopModal.hidden) return; // nur zeichnen, wenn sichtbar
+    list.innerHTML = "";
+
+    if (!shop.length) {
+      const leer = document.createElement("li");
+      leer.className = "shop-empty";
+      leer.textContent = "Noch nichts drauf — was fehlt euch?";
+      list.appendChild(leer);
+    } else {
+      // Offenes zuerst, Abgehaktes nach unten
+      shop.slice().sort((a, b) => (a.done === b.done ? (b.u || 0) - (a.u || 0) : a.done ? 1 : -1))
+        .forEach((item, idx) => {
+          const li = document.createElement("li");
+          li.className = "shop-row" + (item.done ? " done" : "");
+          li.style.animationDelay = `${Math.min(idx, 8) * 30}ms`;
+
+          const label = document.createElement("label");
+          const cb = document.createElement("input");
+          cb.type = "checkbox";
+          cb.checked = !!item.done;
+          const mark = document.createElement("span");
+          mark.className = "checkmark";
+          mark.innerHTML = '<svg viewBox="0 0 12 10" fill="none"><polyline points="1.5 5.5 4.5 8.5 10.5 1.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+          const txt = document.createElement("span");
+          txt.className = "shop-text";
+          txt.textContent = item.text;
+          label.append(cb, mark, txt);
+
+          cb.addEventListener("change", () => {
+            item.done = cb.checked;
+            item.by = item.done ? me : item.by;
+            touch(item);
+            saveShop();
+            markDirty("meta");
+            renderShop();
+            if (item.done && navigator.vibrate && !reducedMotion) navigator.vibrate(10);
+          });
+
+          const von = memberById(item.addedBy);
+          if (von) {
+            const by = document.createElement("span");
+            by.className = "shop-by";
+            by.textContent = von.name;
+            li.appendChild(label);
+            li.appendChild(by);
+          } else {
+            li.appendChild(label);
+          }
+
+          const del = document.createElement("button");
+          del.className = "member-del";
+          del.title = "Entfernen";
+          del.innerHTML = '<svg viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+          del.addEventListener("click", () => {
+            const weg = item;
+            shop = shop.filter((x) => x.id !== item.id);
+            tombs.shop[item.id] = Date.now();
+            saveShop();
+            saveTombs();
+            markDirty("meta");
+            renderShop();
+            showToast(`„${weg.text}" entfernt.`, "Rückgängig", () => {
+              delete tombs.shop[weg.id];
+              touch(weg);
+              shop.push(weg);
+              saveShop();
+              saveTombs();
+              markDirty("meta");
+              renderShop();
+            });
+          });
+          li.appendChild(del);
+          list.appendChild(li);
+        });
+    }
+
+    const erledigt = shop.filter((i) => i.done).length;
+    document.getElementById("shopSummary").textContent = shop.length
+      ? `${offen} offen · ${erledigt} im Wagen`
+      : "";
+    document.getElementById("shopClear").hidden = erledigt === 0;
+    shopSuggest();
+  }
+
+  function openShop() {
+    shopModal.hidden = false;
+    renderShop();
+    document.getElementById("shopInput").focus();
+  }
+
+  document.getElementById("shopBtn").addEventListener("click", openShop);
+  document.getElementById("shopClose").addEventListener("click", () => { shopModal.hidden = true; });
+  shopModal.addEventListener("click", (e) => { if (e.target === shopModal) shopModal.hidden = true; });
+
+  document.getElementById("shopForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const input = document.getElementById("shopInput");
+    const text = input.value.trim();
+    if (!text) return;
+    shop.push({ id: crypto.randomUUID(), text, done: false, addedBy: me, u: Date.now() });
+    input.value = "";
+    saveShop();
+    markDirty("meta");
+    renderShop();
+    input.focus();
+  });
+
+  document.getElementById("shopClear").addEventListener("click", () => {
+    const weg = shop.filter((i) => i.done);
+    if (!weg.length) return;
+    weg.forEach((i) => { tombs.shop[i.id] = Date.now(); });
+    shop = shop.filter((i) => !i.done);
+    saveShop();
+    saveTombs();
+    markDirty("meta");
+    renderShop();
+    showToast(`${weg.length} erledigte Einträge entfernt.`, "Rückgängig", () => {
+      weg.forEach((i) => { delete tombs.shop[i.id]; touch(i); shop.push(i); });
+      saveShop();
+      saveTombs();
+      markDirty("meta");
+      renderShop();
+    });
+  });
+
+  renderShop();
+
+  /* ---------- Benachrichtigungen & Icon-Zähler ---------- */
+
+  const NOTIF_KEY = "wochenplaner.notif.v1";
+  const NOTIFIED_KEY = "wochenplaner.notified.v1";
+  let notifOn = localStorage.getItem(NOTIF_KEY) === "1";
+  let notified = new Set(loadJSON(NOTIFIED_KEY, []));
+  const notifBtn = document.getElementById("notifBtn");
+
+  function paintNotifBtn() {
+    if (!notifBtn) return;
+    const erlaubt = "Notification" in window && Notification.permission === "granted";
+    notifBtn.classList.toggle("on", notifOn && erlaubt);
+    notifBtn.title = notifOn && erlaubt
+      ? "Erinnerungen melden sich — tippen zum Ausschalten"
+      : "Erinnerungen aufs Handy melden lassen";
+  }
+
+  async function toggleNotif() {
+    if (!("Notification" in window)) {
+      showToast("Dein Browser unterstützt keine Benachrichtigungen.");
+      return;
+    }
+    if (notifOn) {
+      notifOn = false;
+      localStorage.setItem(NOTIF_KEY, "0");
+      paintNotifBtn();
+      showToast("Benachrichtigungen aus.");
+      return;
+    }
+    let p = Notification.permission;
+    if (p === "default") p = await Notification.requestPermission();
+    if (p !== "granted") {
+      showToast("Benachrichtigungen sind im Browser blockiert — bitte dort erlauben.");
+      return;
+    }
+    notifOn = true;
+    localStorage.setItem(NOTIF_KEY, "1");
+    paintNotifBtn();
+    showToast("Erinnerungen melden sich jetzt zur Uhrzeit 🔔");
+    checkDue();
+  }
+
+  if (notifBtn) notifBtn.addEventListener("click", toggleNotif);
+
+  async function notify(titel, text) {
+    if (!notifOn || Notification.permission !== "granted") return;
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const opts = { body: text, icon: "icons/icon-192.png", badge: "icons/icon-192.png", tag: titel + text };
+      if (reg) await reg.showNotification(titel, opts);
+      else new Notification(titel, opts);
+    } catch { /* Benachrichtigung nicht möglich — kein Beinbruch */ }
+  }
+
+  // Fällige Erinnerungen/Aufgaben melden + Zahl am App-Icon setzen
+  function checkDue() {
+    const heute = toKey(new Date());
+    const jetzt = new Date();
+    const meine = (data[heute] || []).filter(
+      (t) => !t.done && canSee(t) && (!t.assignee || t.assignee === me || !memberById(t.assignee))
+    );
+
+    // Zahl am App-Icon (bleibt auch nach dem Schließen stehen)
+    if ("setAppBadge" in navigator) {
+      const offen = meine.length;
+      if (offen > 0) navigator.setAppBadge(offen).catch(() => {});
+      else navigator.clearAppBadge?.().catch(() => {});
+    }
+
+    if (!notifOn) return;
+    (data[heute] || []).forEach((t) => {
+      if (t.done || !t.time || notified.has(t.id)) return;
+      if (t.assignee && t.assignee !== me) return; // nur, was mich betrifft
+      if (!canSee(t)) return;
+      const [h, min] = t.time.split(":").map(Number);
+      const faellig = new Date();
+      faellig.setHours(h, min, 0, 0);
+      // im Zeitfenster von 0–30 Min nach Fälligkeit melden
+      const diff = jetzt - faellig;
+      if (diff >= 0 && diff < 30 * 60 * 1000) {
+        const von = memberById(t.from);
+        notify(
+          t.kind === "reminder" ? `Erinnerung${von ? ` von ${von.name}` : ""}` : "Wochenplaner",
+          `${t.time} — ${t.text}`
+        );
+        notified.add(t.id);
+        // Liste klein halten
+        if (notified.size > 200) notified = new Set([...notified].slice(-100));
+        localStorage.setItem(NOTIFIED_KEY, JSON.stringify([...notified]));
+      }
+    });
+  }
+
+  paintNotifBtn();
+  setInterval(checkDue, 60000);
+  setTimeout(checkDue, 2000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") checkDue();
+  });
+
   /* ---------- Daten sichern & laden ---------- */
 
   document.getElementById("exportBtn").addEventListener("click", () => {
@@ -1629,6 +2107,7 @@
       tasks: data,
       members,
       routines,
+      shop,
       routineSkips: [...routineSkips],
     };
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
@@ -1655,11 +2134,14 @@
           showToast("Das ist keine gültige Wochenplaner-Sicherung.");
           return;
         }
-        const prev = { data, members, routines, skips: [...routineSkips] };
+        const prev = { data, members, routines, shop, skips: [...routineSkips] };
         data = backup.tasks || {};
         members = backup.members || [];
         routines = backup.routines || [];
+        shop = backup.shop || [];
         routineSkips = new Set(backup.routineSkips || []);
+        saveShop();
+        renderShop();
         // Import gewinnt beim Sync: alles frisch stempeln
         const stamp = Date.now();
         Object.values(data).forEach((list) => list.forEach((t) => { t.u = stamp; }));
@@ -1676,11 +2158,14 @@
           data = prev.data;
           members = prev.members;
           routines = prev.routines;
+          shop = prev.shop;
           routineSkips = new Set(prev.skips);
           saveData();
           saveMembers();
           saveRoutines();
+          saveShop();
           paintMeBtn();
+          renderShop();
           render();
         });
       } catch {
@@ -1734,6 +2219,7 @@
     lastPct = pct;
     renderMemberStats(dates);
     renderForYou(dates);
+    updateRecapBtn(dates);
   }
 
   /* ---------- "Für dich": deine Woche auf einen Blick ---------- */
