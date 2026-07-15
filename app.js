@@ -8,7 +8,9 @@
   const SKIPS_KEY = "wochenplaner.routineSkips.v1";
   const GROUP_KEY = "wochenplaner.group.v1";
   const TOMBS_KEY = "wochenplaner.tombstones.v1";
-  const KV_BASE = "https://kvdb.io";
+  // Speicher ohne Konto/Anmeldung; Inhalte sind vor dem Upload verschlüsselt
+  const STORE_READ = "https://textdb.online/";
+  const STORE_WRITE = "https://textdb.online/update/";
   const DAY_NAMES = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"];
   const DATE_FMT = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit" });
   const RANGE_FMT = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "long", year: "numeric" });
@@ -1212,12 +1214,12 @@
     const all = new Uint8Array(iv.length + ct.length);
     all.set(iv);
     all.set(ct, 12);
-    return bytesToB64(all);
+    return bytesToB64u(all); // URL-sicher: bleibt in der Adresse kompakt
   }
 
   async function decPayload(s) {
     try {
-      const all = Uint8Array.from(atob(s.trim()), (c) => c.charCodeAt(0));
+      const all = b64uToBytes(s.trim());
       const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: all.slice(0, 12) }, await getCryptoKey(), all.slice(12));
       return JSON.parse(new TextDecoder().decode(pt));
     } catch {
@@ -1227,31 +1229,23 @@
 
   /* --- Speicher-Zugriff --- */
 
+  function storeKey(k) {
+    return `wp-${group.bucket}-${k}`;
+  }
+
   async function kvGet(k) {
-    const r = await fetch(`${KV_BASE}/${group.bucket}/${k}`, { cache: "no-store" });
-    if (r.status === 404) return null;
-    if (!r.ok) throw new Error(`kv ${r.status}`);
-    return r.text();
+    // ohne Schrägstrich am Ende: sonst 301-Weiterleitung ohne CORS-Freigabe -> Browser blockt
+    const r = await fetch(`${STORE_READ}${storeKey(k)}`, { cache: "no-store" });
+    if (!r.ok) throw new Error(`store ${r.status}`);
+    const t = (await r.text()).trim();
+    return t.length ? t : null; // leer = noch nichts gespeichert
   }
 
   async function kvPut(k, body) {
-    const r = await fetch(`${KV_BASE}/${group.bucket}/${k}`, { method: "PUT", body });
-    if (r.status === 403) {
-      setPendingVerify(true);
-      throw new Error("kv 403");
-    }
-    setPendingVerify(false);
-    if (!r.ok) throw new Error(`kv ${r.status}`);
-  }
-
-  // Speicher noch nicht freigeschaltet? Banner steuern.
-  function setPendingVerify(on) {
-    if (!group) return;
-    if (!!group.pendingVerify === on) { updateSyncUi(); return; }
-    group.pendingVerify = on;
-    localStorage.setItem(GROUP_KEY, JSON.stringify(group));
-    if (!on) showToast("Sync ist jetzt aktiv — eure Geräte gleichen sich ab ✨");
-    updateSyncUi();
+    // POST mit Query-Parametern = einfache Anfrage, kein CORS-Vorabcheck nötig
+    const url = `${STORE_WRITE}?key=${encodeURIComponent(storeKey(k))}&value=${encodeURIComponent(body)}`;
+    const r = await fetch(url, { method: "POST" });
+    if (!r.ok) throw new Error(`store ${r.status}`);
   }
 
   /* --- Zusammenführen: neuere Änderung gewinnt, Löschung per Grabstein --- */
@@ -1389,7 +1383,7 @@
       lastSync = Date.now();
       updateSyncUi();
     } catch {
-      items.forEach((i) => dirty.add(i));
+      items.forEach((i) => dirty.add(i)); // beim nächsten Versuch erneut senden
     } finally {
       syncBusy = false;
     }
@@ -1414,30 +1408,9 @@
     off.hidden = !!group;
     on.hidden = !group;
     if (group) {
-      const banner = document.getElementById("syncActivate");
       const status = document.getElementById("syncStatus");
-      if (group.pendingVerify) {
-        banner.hidden = false;
-        status.classList.add("pending");
-        if (group.email) {
-          // Ersteller: eigene Aktivierung nötig
-          document.getElementById("syncActivateEmail").textContent = group.email;
-          document.getElementById("activateLink").hidden = false;
-          status.textContent = "Warte auf E-Mail-Bestätigung…";
-        } else {
-          // Beigetreten: der Ersteller muss noch bestätigen
-          banner.querySelector("strong").textContent = "Sync fast bereit";
-          banner.querySelector("p").textContent =
-            "Die Person, die diese Gruppe erstellt hat, muss ihre Bestätigungs-Mail noch anklicken. Danach gleicht sich alles automatisch ab — du musst nichts tun.";
-          document.getElementById("activateLink").hidden = true;
-          status.textContent = "Warte auf Freischaltung durch den Ersteller…";
-        }
-      } else {
-        banner.hidden = true;
-        status.classList.remove("pending");
-        const t = lastSync ? new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" }).format(lastSync) : "–";
-        status.textContent = `Gruppe verbunden · zuletzt abgeglichen ${t} Uhr`;
-      }
+      const t = lastSync ? new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" }).format(lastSync) : "–";
+      status.textContent = `Gruppe verbunden · zuletzt abgeglichen ${t} Uhr`;
       document.getElementById("inviteLink").value = inviteLink();
       document.getElementById("waShare").href =
         `https://wa.me/?text=${encodeURIComponent("Komm in unseren Familien-Wochenplaner! Öffne den Link auf deinem Handy: " + inviteLink())}`;
@@ -1468,22 +1441,10 @@
   }
 
   document.getElementById("createGroupBtn").addEventListener("click", async () => {
-    const email = document.getElementById("syncEmail").value.trim();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-      showToast("Bitte gib eine gültige E-Mail-Adresse ein.");
-      return;
-    }
-    try {
-      const r = await fetch(KV_BASE, { method: "POST", body: new URLSearchParams({ email }) });
-      const bucket = (await r.text()).trim();
-      if (!r.ok || !/^[A-Za-z0-9_-]{8,}$/.test(bucket)) throw new Error("bucket");
-      const key = bytesToB64u(crypto.getRandomValues(new Uint8Array(32)));
-      // Frische Buckets müssen per E-Mail freigeschaltet werden -> Banner sofort zeigen
-      await joinGroup({ bucket, key, email, pendingVerify: true });
-      window.open("https://kvdb.io/login", "_blank", "noopener");
-    } catch {
-      showToast("Gruppe konnte nicht erstellt werden — bitte später erneut versuchen.");
-    }
+    // Gruppen-Kennung und Schlüssel entstehen direkt auf dem Gerät — kein Konto, keine E-Mail
+    const bucket = bytesToB64u(crypto.getRandomValues(new Uint8Array(12)));
+    const key = bytesToB64u(crypto.getRandomValues(new Uint8Array(32)));
+    await joinGroup({ bucket, key });
   });
 
   document.getElementById("joinBtn").addEventListener("click", () => {
@@ -1543,14 +1504,15 @@
   });
 
   window.addEventListener("hashchange", maybeOfferJoin);
-  maybeOfferJoin();
+  // erst nach dem vollständigen Start prüfen: showToast greift auf später
+  // deklarierte Variablen zu und würde die Initialisierung sonst abbrechen
+  setTimeout(maybeOfferJoin, 0);
 
   // regelmäßig abgleichen, solange die App sichtbar ist
   function syncTick() {
     if (!group || document.visibilityState !== "visible") return;
     pullNow();
-    // Nach der Freischaltung liegen gebliebene Daten erneut hochladen
-    if (group.pendingVerify) { markAllDirty(); pushNow(); }
+    if (dirty.size) pushNow();
   }
   if (group) setTimeout(syncTick, 800);
   setInterval(syncTick, 30000);
